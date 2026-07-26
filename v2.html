@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#030814">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>ΑΙΑΣ — v2</title>
+<style>
+  :root{ --bg:#030814; --amber:#ffb63f; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg)}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    color:#c8d4ee;
+  }
+
+  #stage{position:fixed;inset:0}
+  #cv{display:block;width:100%;height:100%}
+
+  /* ---------- Start overlay ---------- */
+  #overlay{
+    position:fixed;inset:0;
+    background:rgba(3,8,20,.86);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;z-index:20;
+    text-align:center;padding:24px;
+    transition:opacity .6s ease;
+  }
+  #overlay.hidden{opacity:0;pointer-events:none}
+  #overlay h1{
+    font-size:15px;font-weight:600;letter-spacing:.42em;
+    color:var(--amber);text-transform:uppercase;
+    text-shadow:0 0 18px rgba(255,182,63,.45);
+    margin-left:.42em;
+  }
+  #overlay p{font-size:14px;line-height:1.5;max-width:320px;color:#9fb0d4}
+  #overlay .hint{font-size:12px;color:#5c6a8c}
+  #startBtn{
+    margin-top:10px;
+    border:1px solid rgba(255,182,63,.5);
+    background:rgba(255,182,63,.07);
+    color:#e8d8b8;
+    font-size:14px;letter-spacing:.08em;
+    padding:12px 34px;border-radius:999px;cursor:pointer;
+  }
+  #startBtn:active{background:rgba(255,182,63,.2)}
+  #startBtn:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+  /* ---------- Controls ---------- */
+  #gear{
+    position:fixed;top:14px;right:14px;z-index:15;
+    width:42px;height:42px;border-radius:50%;
+    border:none;background:transparent;color:#5c6a8c;
+    font-size:20px;cursor:pointer;opacity:.35;
+    transition:opacity .4s;
+  }
+  #gear.faded{opacity:0;pointer-events:none}
+  #gear:focus-visible{outline:2px solid var(--amber);outline-offset:2px;opacity:1}
+
+  #panel{
+    position:fixed;top:60px;right:14px;z-index:15;
+    background:rgba(6,13,30,.94);
+    border:1px solid rgba(255,182,63,.25);
+    border-radius:14px;padding:18px 18px 14px;
+    width:min(280px,86vw);
+    display:none;flex-direction:column;gap:14px;
+  }
+  #panel.open{display:flex}
+  #panel label{font-size:12px;color:#9fb0d4;display:flex;flex-direction:column;gap:6px}
+  #panel input[type=range]{width:100%;accent-color:var(--amber)}
+  #panel button{
+    border:1px solid rgba(255,182,63,.4);background:transparent;
+    color:#e8d8b8;font-size:13px;padding:9px;border-radius:9px;cursor:pointer;
+  }
+  #panel .note{font-size:11px;color:#5c6a8c;line-height:1.45}
+
+  #err{
+    position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+    z-index:25;background:rgba(60,15,15,.92);border:1px solid #a04040;
+    color:#f0c8c8;font-size:13px;line-height:1.5;
+    padding:12px 18px;border-radius:12px;max-width:88vw;display:none;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="overlay">
+  <h1>ΑΙΑΣ</h1>
+  <p>Οπτικοποίηση φωνής σε πραγματικό χρόνο.<br>Η μπάρα ανάβει όταν ακούγεται ομιλία.</p>
+  <button id="startBtn">Εκκίνηση</button>
+  <p class="hint">Θα ζητηθεί πρόσβαση στο μικρόφωνο</p>
+</div>
+
+<button id="gear" aria-label="Ρυθμίσεις">⚙</button>
+
+<div id="panel">
+  <label>Ευαισθησία
+    <input type="range" id="sens" min="0.5" max="4" step="0.05" value="1.7">
+  </label>
+  <label>Κατώφλι θορύβου
+    <input type="range" id="gate" min="0" max="0.35" step="0.01" value="0.07">
+  </label>
+  <label>Εύρος κίνησης
+    <input type="range" id="range" min="0.3" max="1.8" step="0.05" value="1">
+  </label>
+  <button id="fsBtn">Πλήρης οθόνη</button>
+  <p class="note">Αν η μπάρα ανάβει από τον θόρυβο του δρόμου, ανέβασε το κατώφλι. Αν αντιδρά αδύναμα στη φωνή, ανέβασε την ευαισθησία. Το εύρος ρυθμίζει πόσο ανοίγει και φουσκώνει.</p>
+</div>
+
+<div id="err"></div>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const overlay=$('overlay'), startBtn=$('startBtn'), gear=$('gear'), panel=$('panel'),
+        errBox=$('err'), cv=$('cv');
+  const ctx=cv.getContext('2d');
+  const sensEl=$('sens'), gateEl=$('gate'), rangeEl=$('range');
+  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let audioCtx=null, analyser=null, freqData=null, wakeLock=null, running=false;
+  let level=0, levelS=0;
+  let W=0, H=0;
+
+  /* ---------- canvas sizing ---------- */
+  function resize(){
+    const dpr=Math.min(window.devicePixelRatio||1, 2);
+    W=cv.clientWidth; H=cv.clientHeight;
+    cv.width=Math.round(W*dpr);
+    cv.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(resize).observe(cv);
+  addEventListener('orientationchange',()=>setTimeout(resize,120));
+  resize();
+
+  /* ---------- drawing ---------- */
+  function background(){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#02050B');
+    g.addColorStop(1,'#050A16');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // flat, uniform amber core with a soft symmetric falloff around it
+  function bar(half, h, glowA, hot){
+    const y=H*0.5, r=h/2;
+
+    const g=ctx.createLinearGradient(W/2-half*2.6,0,W/2+half*2.6,0);
+    g.addColorStop(0.00,'rgba(255,157,30,0)');
+    g.addColorStop(0.28,'rgba(255,157,30,'+(0.10*glowA).toFixed(3)+')');
+    g.addColorStop(0.50,'rgba(255,157,30,'+(0.26*glowA).toFixed(3)+')');
+    g.addColorStop(0.72,'rgba(255,157,30,'+(0.10*glowA).toFixed(3)+')');
+    g.addColorStop(1.00,'rgba(255,157,30,0)');
+    ctx.fillStyle=g;
+    ctx.fillRect(W/2-half*2.6, y-h*3.2, half*5.2, h*6.4);
+
+    // ignition: core shifts toward warm white at high level
+    const cr=Math.round(255), cg=Math.round(182+(239-182)*hot), cb=Math.round(63+(207-63)*hot);
+
+    ctx.save();
+    ctx.shadowColor='rgba(255,170,40,'+(0.55+0.35*glowA).toFixed(3)+')';
+    ctx.shadowBlur=Math.max(18, W*0.035*(0.6+0.7*glowA));
+    ctx.fillStyle='rgb('+cr+','+cg+','+cb+')';
+    ctx.beginPath();
+    ctx.roundRect(W/2-half, y-r, half*2, h, r);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function render(v){
+    background();
+    const range=parseFloat(rangeEl.value);
+    const m=reduceMotion?0:v;
+
+    // πλάτος = κύρια ανάγνωση · ύψος = ακολουθεί, περίπου στο ένα τρίτο
+    const half=W*(0.115+0.245*m*range);
+    const h   =Math.max(5,H*0.030*(1+0.75*m*range));
+
+    bar(half, h, Math.pow(v,1.15), v*v);
+  }
+
+  /* ---------- audio ---------- */
+  function showErr(msg){ errBox.textContent=msg; errBox.style.display='block'; }
+  function hideErr(){ errBox.style.display='none'; }
+
+  async function start(){
+    if(running) return;
+    hideErr();
+    if(location.protocol==='file:'){
+      showErr('Το αρχείο έχει ανοίξει τοπικά (file://). Ο Chrome μπλοκάρει το μικρόφωνο σε τοπικά αρχεία. Άνοιξε την εφαρμογή από τη διεύθυνσή της (https).');
+      return;
+    }
+    if(!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      showErr('Ο browser δεν επιτρέπει μικρόφωνο σε αυτή τη διεύθυνση. Το μικρόφωνο λειτουργεί μόνο σε σελίδες https ή localhost.');
+      return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({
+        audio:{ echoCancellation:false, noiseSuppression:true, autoGainControl:false }
+      });
+      audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+      const src=audioCtx.createMediaStreamSource(stream);
+      analyser=audioCtx.createAnalyser();
+      analyser.fftSize=2048;
+      analyser.smoothingTimeConstant=0.55;
+      src.connect(analyser);
+      freqData=new Uint8Array(analyser.frequencyBinCount);
+      running=true;
+      overlay.classList.add('hidden');
+      requestWakeLock();
+      requestAnimationFrame(loop);
+    }catch(e){
+      if(e && (e.name==='NotAllowedError'||e.name==='SecurityError')){
+        showErr('Ο browser αρνήθηκε την πρόσβαση στο μικρόφωνο. Πάτα το εικονίδιο δίπλα στη διεύθυνση → Δικαιώματα → Μικρόφωνο → Να επιτρέπεται, και ανανέωσε.');
+      }else if(e && e.name==='NotFoundError'){
+        showErr('Δεν βρέθηκε μικρόφωνο στη συσκευή.');
+      }else{
+        showErr('Σφάλμα μικροφώνου: '+(e && e.name ? e.name : 'άγνωστο')+'. Δοκίμασε ανανέωση σελίδας.');
+      }
+    }
+  }
+
+  async function requestWakeLock(){
+    try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); } }catch(e){}
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible' && running) requestWakeLock();
+    if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  });
+
+  // ζώνη φωνής ≈ 100 Hz – 4 kHz
+  function voiceLevel(){
+    analyser.getByteFrequencyData(freqData);
+    const binHz=audioCtx.sampleRate/analyser.fftSize;
+    const lo=Math.max(1,Math.floor(100/binHz));
+    const hi=Math.min(freqData.length-1,Math.ceil(4000/binHz));
+    let sum=0;
+    for(let i=lo;i<=hi;i++) sum+=freqData[i];
+    return (sum/(hi-lo+1))/255;
+  }
+
+  function loop(now){
+    if(!running) return;
+    const raw=voiceLevel();
+    const gate=parseFloat(gateEl.value);
+    const sens=parseFloat(sensEl.value);
+    let target=Math.max(0,raw-gate)/(1-gate);
+    target=Math.min(1,target*sens);
+
+    // γλυκιά απόκριση: απαλό άναμμα, αργό σβήσιμο, αδράνεια
+    level  += (target-level) * (target>level ? 0.28 : 0.06);
+    levelS += (level-levelS) * 0.20;
+
+    // ήρεμη αναπνοή στην ησυχία — ποτέ εντελώς σβηστό
+    const breath=0.07+0.05*Math.sin(now/1000*0.9);
+    render(Math.max(levelS,breath));
+
+    requestAnimationFrame(loop);
+  }
+
+  /* ---------- UI ---------- */
+  startBtn.addEventListener('click',start);
+  gear.addEventListener('click',()=>panel.classList.toggle('open'));
+
+  $('fsBtn').addEventListener('click',async ()=>{
+    const el=document.documentElement;
+    if(!document.fullscreenElement){
+      try{
+        await el.requestFullscreen();
+        if(screen.orientation && screen.orientation.lock){
+          screen.orientation.lock('landscape').catch(()=>{});
+        }
+      }catch(e){}
+    }else{
+      document.exitFullscreen && document.exitFullscreen();
+    }
+    panel.classList.remove('open');
+    setTimeout(resize,300);
+  });
+
+  let hideT=null;
+  function poke(){
+    gear.classList.remove('faded');
+    clearTimeout(hideT);
+    hideT=setTimeout(()=>{ if(!panel.classList.contains('open')) gear.classList.add('faded'); },4000);
+  }
+  ['pointerdown','pointermove','touchstart'].forEach(ev=>document.addEventListener(ev,poke,{passive:true}));
+  poke();
+
+  // στατική εικόνα πριν την εκκίνηση, ώστε να μη φαίνεται μαύρη οθόνη
+  render(0.10);
+})();
+</script>
+</body>
+</html>
