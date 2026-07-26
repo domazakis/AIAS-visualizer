@@ -134,6 +134,8 @@
     cv.width=Math.round(W*dpr);
     cv.height=Math.round(H*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    gcv.width =Math.max(1,Math.round(W*GS));
+    gcv.height=Math.max(1,Math.round(H*GS));
   }
   new ResizeObserver(resize).observe(cv);
   addEventListener('orientationchange',()=>setTimeout(resize,120));
@@ -148,33 +150,53 @@
     ctx.fillRect(0,0,W,H);
   }
 
-  // flat, uniform amber core with a soft symmetric falloff around it
-  function bar(half, h, glowA, hot){
+  /* ---------- φωτοστέφανο ----------
+     Το φως ζωγραφίζεται σε ξεχωριστό, μικρότερο καμβά και μεγαλώνει στο τέλος.
+     Η θόλωση έχει ΣΤΑΘΕΡΗ ακτίνα: όταν δυναμώνει η φωνή αλλάζει η ένταση
+     του φωτός, όχι η έκτασή του — όπως σε αληθινή λάμπα. */
+  const GS=0.5;                                  // ανάλυση του καμβά φωτός
+  const gcv=document.createElement('canvas');
+  const gctx=gcv.getContext('2d');
+
+  function glow(half, h){
+    const w=gcv.width, ht=gcv.height;
+    if(!w || !ht) return;
+    gctx.clearRect(0,0,w,ht);
+
+    const y=ht*0.5, r=Math.max(1,h*0.5*GS), hw=Math.max(r,half*GS), off=w*3;
+    const col='rgba(255,164,42,1)';
+
+    // δύο στρώσεις σταθερής ακτίνας: κοντινή λάμψη + απλωμένο φωτοστέφανο
+    const layers=[[Math.max(10,W*0.022)*GS, 0.62],
+                  [Math.max(26,W*0.058)*GS, 0.30]];
+
+    for(const [blur,a] of layers){
+      gctx.save();
+      gctx.globalAlpha=a;
+      gctx.fillStyle=col;
+      gctx.shadowColor=col;
+      gctx.shadowBlur=blur;
+      gctx.shadowOffsetX=off;                    // ζωγραφίζουμε μόνο τη σκιά
+      gctx.beginPath();
+      gctx.roundRect(w*0.5-hw-off, y-r, hw*2, r*2, r);
+      gctx.fill();
+      gctx.restore();
+    }
+  }
+
+  // σώμα της μπάρας: ενιαίο, επίπεδο χρώμα
+  function core(half, h, hot){
     const y=H*0.5, r=h/2;
-
-    const g=ctx.createLinearGradient(W/2-half*2.6,0,W/2+half*2.6,0);
-    g.addColorStop(0.00,'rgba(255,157,30,0)');
-    g.addColorStop(0.28,'rgba(255,157,30,'+(0.10*glowA).toFixed(3)+')');
-    g.addColorStop(0.50,'rgba(255,157,30,'+(0.26*glowA).toFixed(3)+')');
-    g.addColorStop(0.72,'rgba(255,157,30,'+(0.10*glowA).toFixed(3)+')');
-    g.addColorStop(1.00,'rgba(255,157,30,0)');
-    ctx.fillStyle=g;
-    ctx.fillRect(W/2-half*2.6, y-h*3.2, half*5.2, h*6.4);
-
-    // ignition: core shifts toward warm white at high level
-    const cr=Math.round(255), cg=Math.round(182+(239-182)*hot), cb=Math.round(63+(207-63)*hot);
-
-    ctx.save();
-    ctx.shadowColor='rgba(255,170,40,'+(0.55+0.35*glowA).toFixed(3)+')';
-    ctx.shadowBlur=Math.max(18, W*0.035*(0.6+0.7*glowA));
-    ctx.fillStyle='rgb('+cr+','+cg+','+cb+')';
+    const cg=Math.round(182+(239-182)*hot), cb=Math.round(63+(207-63)*hot);
+    ctx.fillStyle='rgb(255,'+cg+','+cb+')';
     ctx.beginPath();
     ctx.roundRect(W/2-half, y-r, half*2, h, r);
     ctx.fill();
-    ctx.restore();
   }
 
-  function render(v){
+  let glowS=0.10;                                 // η λάμψη ακολουθεί πιο αργά
+
+  function render(v, dt){
     background();
     const range=parseFloat(rangeEl.value);
     const m=reduceMotion?0:v;
@@ -183,7 +205,19 @@
     const half=W*(0.115+0.245*m*range);
     const h   =Math.max(5,H*0.030*(1+0.75*m*range));
 
-    bar(half, h, Math.pow(v,1.15), v*v);
+    // το φως «ανθίζει» μισό δευτερόλεπτο πίσω από τον πυρήνα
+    glowS += (v-glowS) * (1-Math.exp(-(dt||16)/260));
+    const mg=reduceMotion?0:glowS;
+    const halfG=W*(0.115+0.245*mg*range);
+    const hG   =Math.max(5,H*0.030*(1+0.75*mg*range));
+
+    glow(halfG, hG);
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,0.22+0.85*Math.pow(glowS,1.1));
+    ctx.drawImage(gcv,0,0,W,H);
+    ctx.restore();
+
+    core(half, h, v*v);
   }
 
   /* ---------- audio ---------- */
@@ -247,8 +281,10 @@
     return (sum/(hi-lo+1))/255;
   }
 
+  let last=performance.now();
   function loop(now){
     if(!running) return;
+    const dt=Math.min(60, now-last); last=now;
     const raw=voiceLevel();
     const gate=parseFloat(gateEl.value);
     const sens=parseFloat(sensEl.value);
@@ -261,7 +297,7 @@
 
     // ήρεμη αναπνοή στην ησυχία — ποτέ εντελώς σβηστό
     const breath=0.07+0.05*Math.sin(now/1000*0.9);
-    render(Math.max(levelS,breath));
+    render(Math.max(levelS,breath), dt);
 
     requestAnimationFrame(loop);
   }
@@ -303,7 +339,7 @@
   poke();
 
   // στατική εικόνα πριν την εκκίνηση, ώστε να μη φαίνεται μαύρη οθόνη
-  render(0.10);
+  render(0.10, 16);
 
   // ---- PWA: service worker για offline λειτουργία ----
   if('serviceWorker' in navigator){
