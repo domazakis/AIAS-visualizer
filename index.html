@@ -15,13 +15,10 @@
   body{
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     color:#c8d4ee;
-    display:flex;align-items:center;justify-content:center;
   }
 
-  #stage{width:100vw;height:100vh}
-  #stage svg{width:100%;height:100%;display:block}
-  .layer{will-change:opacity}
-  #barGroup{transform-box:fill-box;transform-origin:center;will-change:transform}
+  #stage{position:fixed;inset:0}
+  #cv{display:block;width:100%;height:100%}
 
   /* ---------- Start overlay ---------- */
   #overlay{
@@ -86,45 +83,11 @@
     color:#f0c8c8;font-size:13px;line-height:1.5;
     padding:12px 18px;border-radius:12px;max-width:88vw;display:none;
   }
-
-  @media (prefers-reduced-motion:reduce){
-    #barGroup{transform:none !important}
-  }
 </style>
 </head>
 <body>
 
-<div id="stage">
-  <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet" aria-label="ΑΙΑΣ">
-    <defs>
-      <filter id="blurSoft" filterUnits="userSpaceOnUse" x="0" y="0" width="1600" height="900">
-        <feGaussianBlur stdDeviation="26"/>
-      </filter>
-      <filter id="blurWide" filterUnits="userSpaceOnUse" x="-200" y="-200" width="2000" height="1300">
-        <feGaussianBlur stdDeviation="60"/>
-      </filter>
-    </defs>
-
-    <g id="barGroup">
-      <!-- ευρύ φωτοστέφανο -->
-      <line id="barWide" class="layer" x1="360" y1="450" x2="1240" y2="450"
-            stroke="#ff9d1e" stroke-width="380" stroke-linecap="round"
-            filter="url(#blurWide)" opacity="0.14"/>
-      <!-- μεσαία λάμψη -->
-      <line id="barSoft" class="layer" x1="350" y1="450" x2="1250" y2="450"
-            stroke="#ffb63f" stroke-width="190" stroke-linecap="round"
-            filter="url(#blurSoft)" opacity="0.30"/>
-      <!-- σώμα της μπάρας: ενιαίο χρώμα -->
-      <line id="barCore" class="layer" x1="340" y1="450" x2="1260" y2="450"
-            stroke="#ffb63f" stroke-width="140" stroke-linecap="round"
-            opacity="0.70"/>
-      <!-- «ανάφλεξη»: καλύπτει ακριβώς όλη τη μπάρα και τη φωτίζει ομοιόμορφα -->
-      <line id="barHot" class="layer" x1="340" y1="450" x2="1260" y2="450"
-            stroke="#ffefcf" stroke-width="140" stroke-linecap="round"
-            opacity="0"/>
-    </g>
-  </svg>
-</div>
+<div id="stage"><canvas id="cv"></canvas></div>
 
 <div id="overlay">
   <h1>ΑΙΑΣ</h1>
@@ -142,8 +105,11 @@
   <label>Κατώφλι θορύβου
     <input type="range" id="gate" min="0" max="0.35" step="0.01" value="0.07">
   </label>
+  <label>Εύρος κίνησης
+    <input type="range" id="range" min="0.3" max="1.8" step="0.05" value="1">
+  </label>
   <button id="fsBtn">Πλήρης οθόνη</button>
-  <p class="note">Αν η μπάρα ανάβει από τον θόρυβο του δρόμου, ανέβασε το κατώφλι. Αν αντιδρά αδύναμα στη φωνή, ανέβασε την ευαισθησία.</p>
+  <p class="note">Αν η μπάρα ανάβει από τον θόρυβο του δρόμου, ανέβασε το κατώφλι. Αν αντιδρά αδύναμα στη φωνή, ανέβασε την ευαισθησία. Το εύρος ρυθμίζει πόσο ανοίγει και φουσκώνει.</p>
 </div>
 
 <div id="err"></div>
@@ -152,22 +118,84 @@
 (function(){
   const $=id=>document.getElementById(id);
   const overlay=$('overlay'), startBtn=$('startBtn'), gear=$('gear'), panel=$('panel'),
-        errBox=$('err'), barGroup=$('barGroup');
-  const L={ wide:$('barWide'), soft:$('barSoft'), core:$('barCore'), hot:$('barHot') };
-  const sensEl=$('sens'), gateEl=$('gate');
+        errBox=$('err'), cv=$('cv');
+  const ctx=cv.getContext('2d');
+  const sensEl=$('sens'), gateEl=$('gate'), rangeEl=$('range');
   const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let audioCtx=null, analyser=null, freqData=null, wakeLock=null, running=false;
   let level=0, levelS=0;
+  let W=0, H=0;
 
+  /* ---------- canvas sizing ---------- */
+  function resize(){
+    const dpr=Math.min(window.devicePixelRatio||1, 2);
+    W=cv.clientWidth; H=cv.clientHeight;
+    cv.width=Math.round(W*dpr);
+    cv.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(resize).observe(cv);
+  addEventListener('orientationchange',()=>setTimeout(resize,120));
+  resize();
+
+  /* ---------- drawing ---------- */
+  function background(){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#02050B');
+    g.addColorStop(1,'#050A16');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // flat, uniform amber core with a soft symmetric falloff around it
+  function bar(half, h, glowA, hot){
+    const y=H*0.5, r=h/2;
+
+    const g=ctx.createLinearGradient(W/2-half*2.6,0,W/2+half*2.6,0);
+    g.addColorStop(0.00,'rgba(255,157,30,0)');
+    g.addColorStop(0.28,'rgba(255,157,30,'+(0.10*glowA).toFixed(3)+')');
+    g.addColorStop(0.50,'rgba(255,157,30,'+(0.26*glowA).toFixed(3)+')');
+    g.addColorStop(0.72,'rgba(255,157,30,'+(0.10*glowA).toFixed(3)+')');
+    g.addColorStop(1.00,'rgba(255,157,30,0)');
+    ctx.fillStyle=g;
+    ctx.fillRect(W/2-half*2.6, y-h*3.2, half*5.2, h*6.4);
+
+    // ignition: core shifts toward warm white at high level
+    const cr=Math.round(255), cg=Math.round(182+(239-182)*hot), cb=Math.round(63+(207-63)*hot);
+
+    ctx.save();
+    ctx.shadowColor='rgba(255,170,40,'+(0.55+0.35*glowA).toFixed(3)+')';
+    ctx.shadowBlur=Math.max(18, W*0.035*(0.6+0.7*glowA));
+    ctx.fillStyle='rgb('+cr+','+cg+','+cb+')';
+    ctx.beginPath();
+    ctx.roundRect(W/2-half, y-r, half*2, h, r);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function render(v){
+    background();
+    const range=parseFloat(rangeEl.value);
+    const m=reduceMotion?0:v;
+
+    // πλάτος = κύρια ανάγνωση · ύψος = ακολουθεί, περίπου στο ένα τρίτο
+    const half=W*(0.115+0.245*m*range);
+    const h   =Math.max(5,H*0.030*(1+0.75*m*range));
+
+    bar(half, h, Math.pow(v,1.15), v*v);
+  }
+
+  /* ---------- audio ---------- */
   function showErr(msg){ errBox.textContent=msg; errBox.style.display='block'; }
   function hideErr(){ errBox.style.display='none'; }
 
   async function start(){
     if(running) return;
     hideErr();
-    if(location.protocol==='file:'){
-      showErr('Το αρχείο έχει ανοίξει τοπικά (file://). Ο Chrome μπλοκάρει το μικρόφωνο σε τοπικά αρχεία. Άνοιξε την εφαρμογή από τη διεύθυνσή της (https) ή από το εικονίδιό της στην αρχική οθόνη.');
+    const proto=location.protocol;
+    if(proto!=='https:' && proto!=='http:'){
+      showErr('Το αρχείο άνοιξε τοπικά ('+proto+'). Ο Chrome επιτρέπει μικρόφωνο μόνο σε σελίδες https. Άνοιξε την εφαρμογή από το εικονίδιό της στην αρχική οθόνη ή από τη διεύθυνσή της.');
       return;
     }
     if(!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -233,29 +261,22 @@
 
     // ήρεμη αναπνοή στην ησυχία — ποτέ εντελώς σβηστό
     const breath=0.07+0.05*Math.sin(now/1000*0.9);
-    const v=Math.max(levelS,breath);
-    const g=Math.pow(v,1.15);
-    const hot=v*v;
+    render(Math.max(levelS,breath));
 
-    // κυρίως ΦΩΣ...
-    L.wide.style.opacity=0.12+0.80*g;
-    L.soft.style.opacity=0.26+0.68*g;
-    L.core.style.opacity=0.62+0.38*g;
-    L.hot.style.opacity =0.85*hot;
-
-    // ...και μέγεθος
-    if(!reduceMotion){
-      const len  =0.90+0.38*v;
-      const thick=1   +0.55*v;
-      barGroup.style.transform='scale('+len.toFixed(4)+','+thick.toFixed(4)+')';
-    }
     requestAnimationFrame(loop);
   }
 
-  // ---- UI ----
-  startBtn.addEventListener('click',start);
+  /* ---------- διατήρηση ρυθμίσεων ---------- */
+  // ρυθμίζεις μία φορά μέσα στο αυτοκίνητο και μένει
+  [[sensEl,'aias.sens'],[gateEl,'aias.gate'],[rangeEl,'aias.range']].forEach(([el,key])=>{
+    try{ const v=localStorage.getItem(key); if(v!==null) el.value=v; }catch(e){}
+    el.addEventListener('input',()=>{ try{ localStorage.setItem(key,el.value); }catch(e){} });
+  });
 
+  /* ---------- UI ---------- */
+  startBtn.addEventListener('click',start);
   gear.addEventListener('click',()=>panel.classList.toggle('open'));
+
   $('fsBtn').addEventListener('click',async ()=>{
     const el=document.documentElement;
     if(!document.fullscreenElement){
@@ -269,6 +290,7 @@
       document.exitFullscreen && document.exitFullscreen();
     }
     panel.classList.remove('open');
+    setTimeout(resize,300);
   });
 
   let hideT=null;
@@ -279,6 +301,9 @@
   }
   ['pointerdown','pointermove','touchstart'].forEach(ev=>document.addEventListener(ev,poke,{passive:true}));
   poke();
+
+  // στατική εικόνα πριν την εκκίνηση, ώστε να μη φαίνεται μαύρη οθόνη
+  render(0.10);
 
   // ---- PWA: service worker για offline λειτουργία ----
   if('serviceWorker' in navigator){

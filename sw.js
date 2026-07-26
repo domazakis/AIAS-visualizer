@@ -1,5 +1,5 @@
 /* ΑΙΑΣ — offline cache */
-const CACHE = 'aias-v1';
+const CACHE = 'aias-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -23,20 +23,38 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+/* αποθηκεύουμε ΜΟΝΟ επιτυχημένες απαντήσεις —
+   αλλιώς ένα 404 κολλάει στην cache και δεν ξεκολλάει */
+function keep(request, response) {
+  if (!response || !response.ok || response.type === 'opaque') return response;
+  const copy = response.clone();
+  caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+  return response;
+}
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+
+  /* Η σελίδα: δίκτυο πρώτα, cache ως δικλείδα.
+     Έτσι κάθε νέα εκδοχή φαίνεται αμέσως, και εκτός δικτύου
+     η εφαρμογή ανοίγει κανονικά. */
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request)
+        .then((resp) => keep(e.request, resp))
+        .catch(() => caches.match(e.request, { ignoreSearch: true })
+          .then((cached) => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  /* Εικονίδια και στατικά: cache πρώτα, είναι πιο γρήγορο */
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((cached) => {
       if (cached) return cached;
       return fetch(e.request)
-        .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-          return resp;
-        })
-        .catch(() => {
-          if (e.request.mode === 'navigate') return caches.match('./index.html');
-        });
+        .then((resp) => keep(e.request, resp))
+        .catch(() => cached);
     })
   );
 });
