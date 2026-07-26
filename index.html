@@ -127,6 +127,10 @@
   let level=0, levelS=0;
   let W=0, H=0;
 
+  const GS=0.5;                                  // ανάλυση του καμβά φωτός
+  const gcv=document.createElement('canvas');
+  const gctx=gcv.getContext('2d');
+
   /* ---------- canvas sizing ---------- */
   function resize(){
     const dpr=Math.min(window.devicePixelRatio||1, 2);
@@ -154,10 +158,6 @@
      Το φως ζωγραφίζεται σε ξεχωριστό, μικρότερο καμβά και μεγαλώνει στο τέλος.
      Η θόλωση έχει ΣΤΑΘΕΡΗ ακτίνα: όταν δυναμώνει η φωνή αλλάζει η ένταση
      του φωτός, όχι η έκτασή του — όπως σε αληθινή λάμπα. */
-  const GS=0.5;                                  // ανάλυση του καμβά φωτός
-  const gcv=document.createElement('canvas');
-  const gctx=gcv.getContext('2d');
-
   function glow(half, h){
     const w=gcv.width, ht=gcv.height;
     if(!w || !ht) return;
