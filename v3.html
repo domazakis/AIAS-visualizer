@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#030814">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>ΑΙΑΣ</title>
+<style>
+  :root{ --bg:#030814; --amber:#ffb63f; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg)}
+  body{ font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:#c8d4ee; }
+
+  #stage{position:fixed;inset:0}
+  #cv{display:block;width:100%;height:100%}
+
+  #overlay{
+    position:fixed;inset:0;background:rgba(3,8,20,.86);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;z-index:20;text-align:center;padding:24px;transition:opacity .6s ease;
+  }
+  #overlay.hidden{opacity:0;pointer-events:none}
+  #overlay h1{
+    font-size:15px;font-weight:600;letter-spacing:.42em;color:var(--amber);
+    text-transform:uppercase;text-shadow:0 0 18px rgba(255,182,63,.45);margin-left:.42em;
+  }
+  #overlay p{font-size:14px;line-height:1.5;max-width:320px;color:#9fb0d4}
+  #overlay .hint{font-size:12px;color:#5c6a8c}
+  #startBtn{
+    margin-top:10px;border:1px solid rgba(234,165,136,.5);background:rgba(234,165,136,.08);
+    color:#e9d3c4;font-size:14px;letter-spacing:.08em;padding:12px 34px;border-radius:999px;cursor:pointer;
+  }
+  #startBtn:active{background:rgba(234,165,136,.2)}
+  #startBtn:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+  #gear{
+    position:fixed;top:14px;right:14px;z-index:15;width:42px;height:42px;border-radius:50%;
+    border:none;background:transparent;color:#5c6a8c;font-size:20px;cursor:pointer;opacity:.35;transition:opacity .4s;
+  }
+  #gear.faded{opacity:0;pointer-events:none}
+  #gear:focus-visible{outline:2px solid var(--amber);outline-offset:2px;opacity:1}
+
+  #panel{
+    position:fixed;top:60px;right:14px;z-index:15;background:rgba(6,13,30,.94);
+    border:1px solid rgba(234,165,136,.25);border-radius:14px;padding:18px 18px 14px;
+    width:min(280px,86vw);display:none;flex-direction:column;gap:14px;
+  }
+  #panel.open{display:flex}
+  #panel label{font-size:12px;color:#9fb0d4;display:flex;flex-direction:column;gap:6px}
+  #panel input[type=range]{width:100%;accent-color:var(--amber)}
+  #panel button{
+    border:1px solid rgba(234,165,136,.4);background:transparent;color:#e9d3c4;
+    font-size:13px;padding:9px;border-radius:9px;cursor:pointer;
+  }
+  #panel .note{font-size:11px;color:#5c6a8c;line-height:1.45}
+
+  #err{
+    position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:25;
+    background:rgba(60,15,15,.92);border:1px solid #a04040;color:#f0c8c8;
+    font-size:13px;line-height:1.5;padding:12px 18px;border-radius:12px;max-width:88vw;display:none;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="overlay">
+  <h1>ΑΙΑΣ</h1>
+  <p>Οπτικοποίηση φωνής σε πραγματικό χρόνο.<br>Η σφαίρα ζωντανεύει όταν ακούγεται ομιλία.</p>
+  <button id="startBtn">Εκκίνηση</button>
+  <p class="hint">Θα ζητηθεί πρόσβαση στο μικρόφωνο</p>
+</div>
+
+<button id="gear" aria-label="Ρυθμίσεις">⚙</button>
+
+<div id="panel">
+  <label>Ευαισθησία
+    <input type="range" id="sens" min="0.5" max="4" step="0.05" value="1.7">
+  </label>
+  <label>Κατώφλι θορύβου
+    <input type="range" id="gate" min="0" max="0.35" step="0.01" value="0.07">
+  </label>
+  <label>Εύρος κίνησης
+    <input type="range" id="range" min="0.3" max="1.8" step="0.05" value="1">
+  </label>
+  <button id="fsBtn">Πλήρης οθόνη</button>
+  <p class="note">Αν η σφαίρα αντιδρά στον θόρυβο του δρόμου, ανέβασε το κατώφλι. Αν αντιδρά αδύναμα στη φωνή, ανέβασε την ευαισθησία. Το εύρος ρυθμίζει πόσο μεγαλώνει.</p>
+</div>
+
+<div id="err"></div>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const overlay=$('overlay'), startBtn=$('startBtn'), gear=$('gear'), panel=$('panel'),
+        errBox=$('err'), cv=$('cv'), ctx=cv.getContext('2d');
+  const sensEl=$('sens'), gateEl=$('gate'), rangeEl=$('range');
+  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let audioCtx=null, analyser=null, freqData=null, wakeLock=null, running=false;
+  let level=0, levelS=0, rS=0, W=0, H=0;
+
+  function resize(){
+    const dpr=Math.min(window.devicePixelRatio||1,2);
+    W=cv.clientWidth; H=cv.clientHeight;
+    cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(resize).observe(cv);
+  addEventListener('orientationchange',()=>setTimeout(resize,120));
+  resize();
+
+  function background(){
+    const g=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.7);
+    g.addColorStop(0,'#070c18'); g.addColorStop(1,'#02050B');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  }
+
+  function hexA(hex,a){
+    const n=parseInt(hex.slice(1),16);
+    return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+  }
+
+  // στατικός κόκκος
+  let grain=null;
+  (function(){
+    const s=140; const c=document.createElement('canvas'); c.width=s; c.height=s;
+    const g=c.getContext('2d'); const img=g.createImageData(s,s);
+    for(let i=0;i<img.data.length;i+=4){ const n=200+Math.floor(Math.random()*55);
+      img.data[i]=img.data[i+1]=img.data[i+2]=n; img.data[i+3]=255; }
+    g.putImageData(img,0,0); grain=c;
+  })();
+
+  // θόρυβος → ζώνες χρώματος
+  function hash(ix,iy){ let h=(ix*374761393 + iy*668265263)&0x7fffffff;
+    h=((h^(h>>13))*1274126177)&0x7fffffff; return (h&0xffff)/0xffff; }
+  const sm=t=>t*t*(3-2*t);
+  function vnoise(x,y){
+    const x0=Math.floor(x),y0=Math.floor(y); const fx=sm(x-x0),fy=sm(y-y0);
+    const v00=hash(x0,y0),v10=hash(x0+1,y0),v01=hash(x0,y0+1),v11=hash(x0+1,y0+1);
+    const a=v00+(v10-v00)*fx,b=v01+(v11-v01)*fx; return a+(b-a)*fy;
+  }
+  function fbm(x,y,t){
+    let n=0;
+    n+=0.5  *vnoise(x     +t*0.6, y            );
+    n+=0.25 *vnoise(x*2.0 -t*0.4, y*2.0 +t*0.3 );
+    n+=0.125*vnoise(x*4.0 +t*0.2, y*4.0 -t*0.5 );
+    return n/0.875;
+  }
+  const BANDS=[
+    {t:0.00, c:[224,146,112]},
+    {t:0.28, c:[233,161,124]},
+    {t:0.48, c:[240,175,133]},
+    {t:0.66, c:[245,188,140]},
+    {t:0.84, c:[249,200,150]},
+    {t:1.01, c:[252,212,162]}
+  ];
+  function bandColor(n){
+    n=Math.min(0.999,Math.max(0,n));
+    for(let i=BANDS.length-1;i>=0;i--){
+      if(n>=BANDS[i].t){
+        const cur=BANDS[i], nx=BANDS[Math.min(i+1,BANDS.length-1)];
+        const seg=(nx.t-cur.t)||1; const p=Math.min(1,(n-cur.t)/seg);
+        const w=0.42; const e=p<(1-w)?0:sm((p-(1-w))/w);
+        return [Math.round(cur.c[0]+(nx.c[0]-cur.c[0])*e),
+                Math.round(cur.c[1]+(nx.c[1]-cur.c[1])*e),
+                Math.round(cur.c[2]+(nx.c[2]-cur.c[2])*e)];
+      }
+    }
+    return BANDS[0].c;
+  }
+
+  const NB=132;
+  const lava=document.createElement('canvas'); lava.width=NB; lava.height=NB;
+  const lctx=lava.getContext('2d'); const limg=lctx.createImageData(NB,NB);
+  let lavaFrame=0;
+  const Lx=-0.48, Ly=-0.52, Lz=0.71;
+  function updateLava(now){
+    const t=now*0.00040; const d=limg.data;
+    for(let py=0;py<NB;py++){
+      const ny=(py/(NB-1))*2-1;
+      for(let px=0;px<NB;px++){
+        const i=(px+py*NB)*4; const nx=(px/(NB-1))*2-1;
+        const r2=nx*nx+ny*ny;
+        if(r2>1.0){ d[i+3]=0; continue; }
+        const nz=Math.sqrt(1-r2);
+        const lon=Math.atan2(nx,nz), lat=Math.asin(ny);
+        const sx=(lon/Math.PI)*2.3, sy=(lat/(Math.PI/2))*2.3;
+        const wu=vnoise(sx*0.6 + t*0.9 + 11.0, sy*0.6 + 7.0);
+        const wv=vnoise(sx*0.6 + 23.0,          sy*0.6 - t*0.8 + 17.0);
+        let n=fbm(sx+(wu-0.5)*1.15+5.0, sy+(wv-0.5)*1.15+5.0, t*0.45);
+        n=Math.min(1,Math.max(0,(n-0.15)/0.7));
+        const c=bandColor(n);
+        let diff=nx*Lx+ny*Ly+nz*Lz; if(diff<0) diff=0;
+        let b=0.52+0.66*diff;
+        const back=Math.max(0, nx*0.5+ny*0.5-nz*0.2)*0.12;
+        b=Math.min(1.22, b+back);
+        d[i]=Math.min(255,c[0]*b); d[i+1]=Math.min(255,c[1]*b);
+        d[i+2]=Math.min(255,c[2]*b); d[i+3]=255;
+      }
+    }
+    lctx.putImageData(limg,0,0);
+  }
+
+  function orb(cx,cy,R,hot,range){
+    // φωτοστέφανο
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    const hg=R*(2.35+0.55*range*hot);
+    const halo=ctx.createRadialGradient(cx,cy,R*0.8,cx,cy,hg);
+    halo.addColorStop(0,  hexA('#eeb187',0.30+0.34*hot));
+    halo.addColorStop(0.4,hexA('#e59a72',0.12+0.16*hot));
+    halo.addColorStop(1,  'rgba(0,0,0,0)');
+    ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(cx,cy,hg,0,7); ctx.fill();
+    ctx.restore();
+
+    // σφαίρα + επιστρώσεις, καθαρό κυκλικό όριο
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.clip();
+    ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(lava, cx-R*1.03, cy-R*1.03, R*2.06, R*2.06);
+
+    if(grain){
+      ctx.save(); ctx.globalCompositeOperation='soft-light'; ctx.globalAlpha=0.45;
+      const tile=R;
+      for(let gx=cx-R; gx<cx+R; gx+=tile)
+        for(let gy=cy-R; gy<cy+R; gy+=tile)
+          ctx.drawImage(grain,gx,gy,tile,tile);
+      ctx.restore();
+    }
+
+    const rim=ctx.createRadialGradient(cx,cy,R*0.74,cx,cy,R);
+    rim.addColorStop(0,'rgba(0,0,0,0)');
+    rim.addColorStop(0.88,'rgba(56,26,12,0)');
+    rim.addColorStop(1,'rgba(46,20,9,0.55)');
+    ctx.fillStyle=rim; ctx.fillRect(cx-R,cy-R,R*2,R*2);
+
+    if(hot>0.001){
+      ctx.globalCompositeOperation='lighter';
+      ctx.fillStyle=hexA('#eaa588',0.18*hot);
+      ctx.fillRect(cx-R,cy-R,R*2,R*2);
+    }
+    ctx.restore();
+  }
+
+  function render(v,now,range){
+    background();
+    if((lavaFrame++ % 2)===0) updateLava(now);
+    const cx=W/2, cy=H*0.5;
+    const base=Math.min(W,H)*0.17;
+    const breath=1+0.03*Math.sin(now/1000*1.1);
+    rS += (v-rS)*0.05;
+    const R=base*breath*(1+(reduceMotion?0:0.30*range*rS));
+    orb(cx,cy,R, Math.min(1,v*v*1.1), range);
+  }
+
+  function showErr(msg){ errBox.textContent=msg; errBox.style.display='block'; }
+  function hideErr(){ errBox.style.display='none'; }
+
+  async function start(){
+    if(running) return; hideErr();
+    const proto=location.protocol;
+    if(proto!=='https:' && proto!=='http:'){
+      showErr('Το αρχείο άνοιξε τοπικά ('+proto+'). Ο Chrome επιτρέπει μικρόφωνο μόνο σε σελίδες https. Άνοιξε την εφαρμογή από το εικονίδιό της ή από τη διεύθυνσή της.'); return;
+    }
+    if(!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      showErr('Ο browser δεν επιτρέπει μικρόφωνο σε αυτή τη διεύθυνση. Λειτουργεί μόνο σε https ή localhost.'); return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({
+        audio:{ echoCancellation:false, noiseSuppression:true, autoGainControl:false }
+      });
+      audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+      const src=audioCtx.createMediaStreamSource(stream);
+      analyser=audioCtx.createAnalyser();
+      analyser.fftSize=2048; analyser.smoothingTimeConstant=0.55;
+      src.connect(analyser);
+      freqData=new Uint8Array(analyser.frequencyBinCount);
+      running=true; overlay.classList.add('hidden');
+      requestWakeLock(); requestAnimationFrame(loop);
+    }catch(e){
+      if(e && (e.name==='NotAllowedError'||e.name==='SecurityError')){
+        showErr('Ο browser αρνήθηκε την πρόσβαση στο μικρόφωνο. Πάτα το εικονίδιο δίπλα στη διεύθυνση → Δικαιώματα → Μικρόφωνο → Να επιτρέπεται, και ανανέωσε.');
+      }else if(e && e.name==='NotFoundError'){ showErr('Δεν βρέθηκε μικρόφωνο στη συσκευή.'); }
+      else{ showErr('Σφάλμα μικροφώνου: '+(e && e.name ? e.name : 'άγνωστο')+'.'); }
+    }
+  }
+
+  async function requestWakeLock(){
+    try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); } }catch(e){}
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible' && running) requestWakeLock();
+    if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  });
+
+  function voiceLevel(){
+    analyser.getByteFrequencyData(freqData);
+    const binHz=audioCtx.sampleRate/analyser.fftSize;
+    const lo=Math.max(1,Math.floor(100/binHz));
+    const hi=Math.min(freqData.length-1,Math.ceil(4000/binHz));
+    let sum=0; for(let i=lo;i<=hi;i++) sum+=freqData[i];
+    return (sum/(hi-lo+1))/255;
+  }
+
+  function loop(now){
+    if(!running) return;
+    const raw=voiceLevel();
+    const gate=parseFloat(gateEl.value), sens=parseFloat(sensEl.value), range=parseFloat(rangeEl.value);
+    let target=Math.max(0,raw-gate)/(1-gate); target=Math.min(1,target*sens);
+    level  += (target-level)*(target>level?0.28:0.06);
+    levelS += (level-levelS)*0.20;
+    const breath=0.07+0.05*Math.sin(now/1000*0.9);
+    render(Math.max(levelS,breath), now, range);
+    requestAnimationFrame(loop);
+  }
+
+  // ιδle preview πριν την εκκίνηση
+  render(0.10, 0, parseFloat(rangeEl.value));
+
+  // διατήρηση ρυθμίσεων
+  [[sensEl,'aias.sens'],[gateEl,'aias.gate'],[rangeEl,'aias.range']].forEach(([el,key])=>{
+    try{ const v=localStorage.getItem(key); if(v!==null) el.value=v; }catch(e){}
+    el.addEventListener('input',()=>{ try{ localStorage.setItem(key,el.value); }catch(e){} });
+  });
+
+  startBtn.addEventListener('click',start);
+  gear.addEventListener('click',()=>panel.classList.toggle('open'));
+  $('fsBtn').addEventListener('click',async ()=>{
+    const el=document.documentElement;
+    if(!document.fullscreenElement){
+      try{ await el.requestFullscreen();
+        if(screen.orientation && screen.orientation.lock){ screen.orientation.lock('landscape').catch(()=>{}); }
+      }catch(e){}
+    }else{ document.exitFullscreen && document.exitFullscreen(); }
+    panel.classList.remove('open'); setTimeout(resize,300);
+  });
+
+  let hideT=null;
+  function poke(){ gear.classList.remove('faded'); clearTimeout(hideT);
+    hideT=setTimeout(()=>{ if(!panel.classList.contains('open')) gear.classList.add('faded'); },4000); }
+  ['pointerdown','pointermove','touchstart'].forEach(ev=>document.addEventListener(ev,poke,{passive:true}));
+  poke();
+
+  if('serviceWorker' in navigator){
+    window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+  }
+})();
+</script>
+</body>
+</html>
