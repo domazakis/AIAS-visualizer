@@ -102,10 +102,11 @@
   const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let audioCtx=null, analyser=null, freqData=null, wakeLock=null, running=false;
-  let level=0, levelS=0, rS=0, W=0, H=0;
+  let level=0, levelS=0, rS=0, W=0, H=0, dprUsed=1;
 
   function resize(){
     const dpr=Math.min(window.devicePixelRatio||1,2);
+    dprUsed=dpr;
     W=cv.clientWidth; H=cv.clientHeight;
     cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -174,9 +175,13 @@
     return BANDS[0].c;
   }
 
-  const NB=240;
-  const lava=document.createElement('canvas'); lava.width=NB; lava.height=NB;
-  const lctx=lava.getContext('2d'); const limg=lctx.createImageData(NB,NB);
+  let NB=240, lava, lctx, limg;
+  function makeLava(n){
+    NB=n;
+    lava=document.createElement('canvas'); lava.width=NB; lava.height=NB;
+    lctx=lava.getContext('2d'); limg=lctx.createImageData(NB,NB);
+  }
+  makeLava(240);
   let lavaFrame=0;
   const Lx=-0.48, Ly=-0.52, Lz=0.71;
   function updateLava(now){
@@ -248,9 +253,13 @@
 
   function render(v,now,range){
     background();
-    if((lavaFrame++ % 2)===0) updateLava(now);
     const cx=W/2, cy=H*0.5;
     const base=Math.min(W,H)*0.23;
+    // αυτόματη ανάλυση σφαίρας: όση χρειάζεται στην οθόνη, με πλαφόν 640
+    const maxR=base*1.05*(1+0.45*range);
+    const want=Math.max(96, Math.min(640, Math.round((2*maxR*dprUsed)/16)*16));
+    if(want!==NB) makeLava(want);
+    if((lavaFrame++ % 2)===0) updateLava(now);
     const breath=1+0.03*Math.sin(now/1000*1.1);
     rS += (v-rS)*0.05;
     const R=base*breath*(1+(reduceMotion?0:0.45*range*rS));
