@@ -174,7 +174,7 @@
     return BANDS[0].c;
   }
 
-  const NB=132;
+  const NB=240;
   const lava=document.createElement('canvas'); lava.width=NB; lava.height=NB;
   const lctx=lava.getContext('2d'); const limg=lctx.createImageData(NB,NB);
   let lavaFrame=0;
@@ -250,7 +250,7 @@
     background();
     if((lavaFrame++ % 2)===0) updateLava(now);
     const cx=W/2, cy=H*0.5;
-    const base=Math.min(W,H)*0.17;
+    const base=Math.min(W,H)*0.23;
     const breath=1+0.03*Math.sin(now/1000*1.1);
     rS += (v-rS)*0.05;
     const R=base*breath*(1+(reduceMotion?0:0.45*range*rS));
