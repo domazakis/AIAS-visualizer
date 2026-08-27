@@ -142,8 +142,8 @@
   <h3>Κορδέλες</h3>
   <label>Πόσες <span id="vRibs">5</span>
     <input type="range" id="sRibs" min="2" max="7" step="1" value="5"></label>
-  <label>Πλάτος <span id="vWide">1.25×</span>
-    <input type="range" id="sWide" min="0.3" max="2.4" step="0.05" value="1.25"></label>
+  <label>Πλάτος <span id="vWide">1.10×</span>
+    <input type="range" id="sWide" min="0.3" max="2.4" step="0.05" value="1.1"></label>
 
   <label>Απαλότητα <span id="vSoft">0.70</span>
     <input type="range" id="sSoft" min="0" max="1" step="0.05" value="0.7"></label>
@@ -231,13 +231,13 @@ function makeRib(idx){
   var ul=Math.sqrt(ux*ux+uy*uy+uz*uz)||1; ux/=ul; uy/=ul; uz/=ul;
   var vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
 
-  var h=[{k:1, ax:ux, ay:uy, az:uz, bx:vx, by:vy, bz:vz, ph:rnd()*TAU, w:0.030+rnd()*0.032}];
+  var h=[{k:1, ax:ux, ay:uy, az:uz, bx:vx, by:vy, bz:vz, ph:rnd()*TAU, w:0.030+rnd()*0.032, acc:0}];
   for(var k=2;k<=3;k++){
     var amp=0.42/Math.pow(k,1.9);
     h.push({k:k,
       ax:(rnd()*2-1)*amp, ay:(rnd()*2-1)*amp, az:(rnd()*2-1)*amp,
       bx:(rnd()*2-1)*amp, by:(rnd()*2-1)*amp, bz:(rnd()*2-1)*amp,
-      ph:rnd()*TAU, w:(rnd()*2-1)*0.068});
+      ph:rnd()*TAU, w:(rnd()*2-1)*0.068, acc:0});
   }
   /* αργή, δική της μετάπτωση του επιπέδου — όχι κοινή περιστροφή */
   var px=rnd()*2-1, py=rnd()*2-1, pz=rnd()*2-1;
@@ -245,7 +245,7 @@ function makeRib(idx){
   return {
     h:h,
     axx:px/pl, axy:py/pl, axz:pz/pl, spd:(rnd()*2-1)*0.027,
-    ofx:(rnd()*2-1)*0.11, ofy:(rnd()*2-1)*0.11, ofz:(rnd()*2-1)*0.11,
+    ofx:(rnd()*2-1)*0.035, ofy:(rnd()*2-1)*0.035, ofz:(rnd()*2-1)*0.035,
     hw : 0.50+rnd()*0.26,
     hwm: 1+Math.floor(rnd()*2),
     hwp: rnd()*TAU,
@@ -259,16 +259,17 @@ function makeRib(idx){
     fold: 0.055+rnd()*0.050,
     foldk: 1+Math.floor(rnd()*2),
     foldp: rnd()*TAU,
-    seed: rnd()*10
+    seed: rnd()*10,
+    accTw:0, accRip:0, accFold:0, accAx:0
   };
 }
 var RIB=[]; for(var ri=0;ri<NRIB;ri++) RIB.push(makeRib(ri));
 
 /* ---------- ποιότητα ---------- */
 var TIER=[
-  {ribs:3, P:56, CH:5, S:26},
-  {ribs:3, P:68, CH:6, S:36},
-  {ribs:4, P:80, CH:7, S:44}
+  {ribs:3, P:56, CH:5, S:20},
+  {ribs:3, P:68, CH:6, S:28},
+  {ribs:4, P:80, CH:7, S:34}
 ];
 var tier = (matchMedia('(pointer:coarse)').matches ? 1 : 2);
 
@@ -309,6 +310,7 @@ addEventListener('orientationchange',function(){ setTimeout(resize,150); });
 
 /* ---------- μία κορδέλα ---------- */
 var BANDS=5, PATHS=null, WIDE=1;
+function wrap(a){ return a>=TAU?a-TAU:(a<0?a+TAU:a); }
 var TRAILFADE=0.42, TRAILK=TRAILFADE;   /* ισοσταθμιστής ουράς: μόνιμη κατάσταση = A/f */
 function setSoft(){ var v=parseFloat($('sSoft').value);
   TRAILFADE=(0.92-0.76*v)*(1-0.12*glowEnv); TRAILK=TRAILFADE; }
@@ -320,7 +322,7 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     var u=i*du, X=0,Y=0,Z=0;
     for(k=0;k<3;k++){
       hh=f.h[k];
-      ang=hh.k*u + hh.ph + t*hh.w*motion;
+      ang=hh.k*u + hh.ph + hh.acc;
       ca=Math.cos(ang); sa=Math.sin(ang);
       X+=hh.ax*ca+hh.bx*sa; Y+=hh.ay*ca+hh.by*sa; Z+=hh.az*ca+hh.bz*sa;
     }
@@ -330,7 +332,7 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
   }
   /* σταθερό μέγεθος, και τράβηγμα προς το κέλυφος ώστε οι κορδέλες
      να αγκαλιάζουν τη σφαίρα αντί να μπερδεύονται στο κέντρο */
-  var sc=0.76/Math.sqrt(maxR), SPH=0.45, RAD=0.76;
+  var sc=0.76/Math.sqrt(maxR), SPH=0.86, RAD=0.88;
   for(i=0;i<P;i++){
     var q3=i*3;
     var X2=HC[q3]*sc, Y2=HC[q3+1]*sc, Z2=HC[q3+2]*sc;
@@ -339,10 +341,10 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     HC[q3]=X2*kk+f.ofx; HC[q3+1]=Y2*kk+f.ofy; HC[q3+2]=Z2*kk+f.ofz;
   }
 
-  var hwK=f.hw*WIDE*(1+0.30*lv+0.25*br)*(1-0.26*calm);
-  var ripK=f.rip*(1+2.0*lv+1.3*br)*(1-0.45*calm);
-  var foldK=f.fold*(1+1.5*lv+1.0*br)*(1-0.35*calm);
-  var SOFT=0.82, SHELL=1.02+0.10*lv+0.05*br;
+  var hwK=f.hw*WIDE*(1+0.34*lv+0.24*br)*(1-0.26*calm);
+  var ripK=f.rip*(1+1.05*lv+0.65*br)*(1-0.40*calm);
+  var foldK=f.fold*(1+0.85*lv+0.50*br)*(1-0.30*calm);
+  var SOFT=0.80, SHELL=0.97+0.04*lv+0.02*br;
 
   for(i=0;i<=P;i++){
     var ii=i%P, u2=i*du, q=ii*3;
@@ -358,7 +360,7 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     e1x/=el; e1y/=el; e1z/=el;
     var e2x=Ty*e1z-Tz*e1y, e2y=Tz*e1x-Tx*e1z, e2z=Tx*e1y-Ty*e1x;
 
-    var psi=f.tw*u2 + f.twp + t*f.tws*motion;
+    var psi=f.tw*u2 + f.twp + f.accTw;
     var cw2=Math.cos(psi), sw2=Math.sin(psi);
     var Wx=cw2*e1x+sw2*e2x, Wy=cw2*e1y+sw2*e2y, Wz=cw2*e1z+sw2*e2z;
     var Nx=cw2*e2x-sw2*e1x, Ny=cw2*e2y-sw2*e1y, Nz=cw2*e2z-sw2*e1z;
@@ -370,8 +372,8 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     for(j=0;j<=S;j++){
       var w=(j/S)*2-1;
       w=(w<0?-1:1)*Math.pow(Math.abs(w),0.72);
-      var rip=ripK*Math.sin(f.ripk*u2 - t*f.ripw*(0.82+0.38*lv)*motion + 0.7*w + f.ripp)
-             +foldK*Math.sin(f.foldk*Math.PI*w + f.foldp + 0.6*u2 - t*0.21*motion);
+      var rip=ripK*Math.sin(f.ripk*u2 - f.accRip + 0.7*w + f.ripp)
+             +foldK*Math.sin(f.foldk*Math.PI*w + f.foldp + 0.6*u2 - f.accFold);
       var px=Cx+w*hw*Wx+rip*Nx, py=Cy+w*hw*Wy+rip*Ny, pz=Cz+w*hw*Wz+rip*Nz;
 
       var L=Math.sqrt(px*px+py*py+pz*pz);
@@ -446,7 +448,7 @@ function drawScene(t,dt,lv,br){
 
   var R = Math.min(CW,CH2)*0.335*sizeK*breath*driftZ
         * (1 - 0.070*mixListen)
-        * (1 + 0.13*lv + 0.08*br);
+        * (1 + 0.17*lv + 0.10*br);
 
   /* πολύ αργή μετατόπιση θέασης — η κίνηση έρχεται από το κυμάτισμα */
   var spin=(0.008+0.015*lv)*motion;
@@ -455,13 +457,22 @@ function drawScene(t,dt,lv,br){
   var MG = mul(mul(rotY(yaw), rotX(pitch)), rotZ(roll));
 
   WIDE=parseFloat($('sWide').value); setSoft();
-  var bright=(1.00+0.20*lv+0.12*glowEnv+0.16*mixListen+0.14*br)*glowK;
+  var bright=(0.76+0.20*lv+0.34*glowEnv+0.15*mixListen+0.14*br)*glowK;
 
   PATHS=[]; for(var pi=0;pi<BANDS*2;pi++) PATHS.push(new Path2D());
   var nrib=Math.min(NRIB, parseInt($('sRibs').value,10)||5);
   for(var i=0;i<nrib;i++){
     var f=RIB[i];
-    var Mi=mul(MG, axisRot(f.axx,f.axy,f.axz, t*f.spd*motion));
+    /* Οι φάσεις ολοκληρώνονται στον χρόνο. Αν τις υπολογίζαμε ως
+       χρόνος επί συχνότητα, τότε κάθε αλλαγή έντασης —που αλλάζει τη
+       συχνότητα— θα μετατόπιζε ακαριαία ολόκληρο το κύμα: οι κορδέλες
+       θα ξεκινούσαν να κουνιούνται από άλλο σημείο σε κάθε συλλαβή. */
+    for(var hk=0;hk<3;hk++) f.h[hk].acc=wrap(f.h[hk].acc + dt*f.h[hk].w*motion);
+    f.accTw  = wrap(f.accTw  + dt*f.tws*motion);
+    f.accRip = wrap(f.accRip + dt*f.ripw*(0.82+0.38*lv)*motion);
+    f.accFold= wrap(f.accFold+ dt*0.21*motion);
+    f.accAx  = wrap(f.accAx  + dt*f.spd*motion);
+    var Mi=mul(MG, axisRot(f.axx,f.axy,f.axz, f.accAx));
     ribbon(Mi,f,Q.P,Q.CH,Q.S,R,cx,cy,t,lv,br,motion,mixListen);
   }
 
@@ -487,14 +498,14 @@ function drawScene(t,dt,lv,br){
   strokeBundles(g2,lv,bright*TRAILK,1/BK);
 
   var core=g2.createRadialGradient(cx,cy,0,cx,cy,R*1.05);
-  core.addColorStop(0,   'rgba(255,204,140,'+((0.024+0.085*glowEnv+0.020*mixListen)*glowK).toFixed(3)+')');
-  core.addColorStop(0.55,'rgba(255,144,46,'+((0.010+0.045*glowEnv)*glowK).toFixed(3)+')');
+  core.addColorStop(0,   'rgba(255,204,140,'+((0.009+0.105*glowEnv+0.018*mixListen)*glowK).toFixed(3)+')');
+  core.addColorStop(0.55,'rgba(255,144,46,'+((0.004+0.055*glowEnv)*glowK).toFixed(3)+')');
   core.addColorStop(1,   'rgba(255,110,20,0)');
   g2.fillStyle=core; g2.beginPath(); g2.arc(cx,cy,R*1.05,0,TAU); g2.fill();
 
   var hr=R*(2.05+0.60*glowEnv);
   var halo=g2.createRadialGradient(cx,cy,R*0.9,cx,cy,hr);
-  halo.addColorStop(0,'rgba(255,146,52,'+((0.026+0.085*glowEnv)*glowK).toFixed(3)+')');
+  halo.addColorStop(0,'rgba(255,146,52,'+((0.010+0.105*glowEnv)*glowK).toFixed(3)+')');
   halo.addColorStop(1,'rgba(255,110,20,0)');
   g2.fillStyle=halo; g2.beginPath(); g2.arc(cx,cy,hr,0,TAU); g2.fill();
   g2.setTransform(1,0,0,1,0,0);
@@ -517,7 +528,7 @@ function composite(lv){
   BC[3].globalAlpha=1;
   /* μία και μόνη επίστρωση σε πλήρη ανάλυση */
   ctx.globalCompositeOperation='lighter';
-  ctx.globalAlpha=Math.min(1,(0.85+0.15*glowEnv)*glowK);
+  ctx.globalAlpha=Math.min(1,(0.68+0.32*glowEnv)*glowK);
   ctx.drawImage(BL[3],0,0,CW,CH2);
   ctx.globalAlpha=1;
   ctx.globalCompositeOperation='source-over';
