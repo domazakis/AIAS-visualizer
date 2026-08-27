@@ -166,14 +166,20 @@ var mode='idle', level=0, levelT=0, extLevel=0, burst=0;
 var mixListen=0, mixSpeak=0;
 
 /* ==================================================================
-   2. ΓΕΩΜΕΤΡΙΑ — «φύλλα φωτός».
-   Κάθε φύλλο είναι μια ταινία γύρω από μια σφαιρική καμπύλη, που
-   συστρέφεται από εφαπτομενική σε ακτινική. Όταν είναι κατά μέτωπο
-   φαίνεται σαν διάφανη μεμβράνη· όταν είναι από την κόψη, σαν
-   φωτεινή γραμμή. Από εκεί βγαίνουν οι πτυχές της αναφοράς.
+   2. ΓΕΩΜΕΤΡΙΑ — ΚΟΡΔΕΛΕΣ.
+   Κάθε κορδέλα είναι μια φαρδιά λωρίδα υφάσματος γύρω από έναν κλειστό
+   βρόχο. Ο βρόχος φτιάχνεται από τρεις αρμονικές με τυχαίους συντελεστές,
+   άρα κάθε κορδέλα «κοιτάει» αλλού — καμία δεν γυρίζει γύρω από κοινό
+   άξονα. Οι αρμονικές αλλάζουν φάση συνεχώς, οπότε η κορδέλα κυματίζει
+   αντί να περιστρέφεται.
+
+   Το φως: μια φωτεινή μεμβράνη φαίνεται αχνή όταν την κοιτάς κατά μέτωπο
+   και εκτυφλωτική όταν την κοιτάς από την κόψη — τότε το βλέμμα διαπερνά
+   πολύ περισσότερο υλικό. Φωτίζουμε λοιπόν κάθε κομμάτι με 1/|n·v|. Έτσι
+   κάθε τσάκιση ανάβει μόνη της, χωρίς να τη ζωγραφίσουμε.
    ================================================================== */
 function rndSeed(s){ return function(){ s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff; }; }
-var rnd = rndSeed(20260827);
+var rnd = rndSeed(7734121);
 
 function rotX(a){var c=Math.cos(a),s=Math.sin(a);return [1,0,0, 0,c,-s, 0,s,c];}
 function rotY(a){var c=Math.cos(a),s=Math.sin(a);return [c,0,s, 0,1,0, -s,0,c];}
@@ -185,275 +191,270 @@ function mul(a,b){
   return o;
 }
 
-/*  A,B  = σχήμα της καμπύλης πάνω στη σφαίρα
-    hw   = μισό πλάτος ταινίας      hwm/hwp = πού στενεύει και πού ανοίγει
-    tw   = συστροφές ανά κύκλο      tws     = αργή περιστροφή της συστροφής
-    cop  = διπλό φύλλο (πιο πλούσια πτυχή)                                */
-var SHEET = [
-  /* δύο δακτύλιοι → καθαρό, φωτεινό περίγραμμα με ήπιο τρίλοβο σχήμα */
-  {A:0, B:1, hw:0.10, hwm:2, tw:0, tws:0, defo:0.035, lobe:3, lobeA:0.070, drift: 0.13, cop:1, lat:1.5708},
-  {A:0, B:1, hw:0.13, hwm:3, tw:0, tws:0, defo:0.030, lobe:2, lobeA:0.055, drift:-0.10, cop:1, lat:1.5708},
-  /* φύλλα που σαρώνουν το εσωτερικό — φαρδιά, ώστε να διαβάζονται ως επιφάνειες */
-  {A:1, B:2, hw:0.22, hwm:2, tw:2, tws: 0.11, defo:0.050, drift: 0.052, cop:1},
-  {A:1, B:3, hw:0.25, hwm:2, tw:2, tws:-0.09, defo:0.045, drift:-0.040, cop:1},
-  {A:2, B:3, hw:0.28, hwm:3, tw:3, tws: 0.13, defo:0.055, drift: 0.033, cop:1},
-  {A:2, B:5, hw:0.19, hwm:2, tw:2, tws:-0.07, defo:0.050, drift:-0.026, cop:1},
-  {A:1, B:5, hw:0.16, hwm:3, tw:2, tws: 0.08, defo:0.045, drift: 0.021, cop:1}
-];
-SHEET.forEach(function(f){
-  f.ph=(f.lat!=null?f.lat:rnd()*TAU); f.ph2=rnd()*TAU; f.twp=rnd()*TAU; f.hwp=rnd()*TAU;
-  f.fixPh=(f.lat!=null);
-  f.seed=rnd()*10;
-  f.M0=mul(mul(rotY(rnd()*TAU), rotX(rnd()*TAU)), rotZ(rnd()*TAU));
-});
+var MAXP=128, MAXS=20;
+function makeRib(){
+  var h=[],k,amp;
+  for(k=1;k<=3;k++){
+    amp=1/Math.pow(k,2.15);
+    h.push({k:k,
+      ax:(rnd()*2-1)*amp, ay:(rnd()*2-1)*amp, az:(rnd()*2-1)*amp,
+      bx:(rnd()*2-1)*amp, by:(rnd()*2-1)*amp, bz:(rnd()*2-1)*amp,
+      ph:rnd()*TAU,
+      w:(rnd()*2-1)*(k===1?0.085:0.30/k)});          /* πόσο γρήγορα μεταμορφώνεται */
+  }
+  return {
+    h:h,
+    hw : 0.17+rnd()*0.14,              /* μισό πλάτος — χοντρή κορδέλα   */
+    hwm: 1+Math.floor(rnd()*3),
+    hwp: rnd()*TAU,
+    tw : 0.35+rnd()*1.05,                /* συστροφές σε έναν γύρο         */
+    tws:(rnd()*2-1)*0.30,
+    twp: rnd()*TAU,
+    rip: 0.05+rnd()*0.055,             /* βάθος τσακίσματος              */
+    ripk: 2+Math.floor(rnd()*4),       /* πόσες τσακίσεις                */
+    ripw: 0.7+rnd()*1.5,               /* ταχύτητα του κύματος           */
+    ripp: rnd()*TAU,
+    seed: rnd()*10
+  };
+}
+var RIB=[]; for(var ri=0;ri<12;ri++) RIB.push(makeRib());
 
-/* ---------- ποιότητα: προσαρμόζεται μόνη της ---------- */
+/* ---------- ποιότητα ---------- */
 var TIER=[
-  {sheets:4, P:104, chunks:6},
-  {sheets:6, P:156, chunks:8},
-  {sheets:7, P:208, chunks:10}
+  {ribs:6, P: 72, CH:5, S:13},
+  {ribs:8, P: 92, CH:6, S:17},
+  {ribs:10,P:108, CH:7, S:19}
 ];
 var tier = (matchMedia('(pointer:coarse)').matches ? 1 : 2);
-var MAXP = 216;
-var ax=new Float32Array(MAXP+2), ay=new Float32Array(MAXP+2), az=new Float32Array(MAXP+2);
-var bx=new Float32Array(MAXP+2), by=new Float32Array(MAXP+2), bz=new Float32Array(MAXP+2);
-var mx=new Float32Array(MAXP+2), my=new Float32Array(MAXP+2);
-var nx2=new Float32Array(MAXP+2), ny2=new Float32Array(MAXP+2);
+
+/* ενδιάμεσοι πίνακες */
+var HC=new Float32Array((MAXP+1)*3);
+var NV=(MAXP+1)*(MAXS+1);
+var VX=new Float32Array(NV), VY=new Float32Array(NV), VZ=new Float32Array(NV);
+var SX=new Float32Array(NV), SY=new Float32Array(NV);
 
 /* ---------- καμβάδες: σκηνή + αλυσίδα λάμψης ---------- */
-var scene=document.createElement('canvas'), sctx=scene.getContext('2d',{alpha:false});
 var BL=[], BC=[];
-for(var k=0;k<4;k++){ var c=document.createElement('canvas'); BL.push(c); BC.push(c.getContext('2d')); }
-var CW=0, CH=0, UNIT=1;
+for(var k=0;k<3;k++){ var c=document.createElement('canvas'); BL.push(c); BC.push(c.getContext('2d')); }
+var CW=0, CH2=0;
 
 function resize(){
-  var dpr=Math.min(window.devicePixelRatio||1, 2);
+  var dpr=Math.min(window.devicePixelRatio||1, 1.75);
   var w=Math.max(1,cv.clientWidth), h=Math.max(1,cv.clientHeight);
   var cw=Math.round(w*dpr), ch=Math.round(h*dpr);
-  var maxPix=2.3e6, over=(cw*ch)/maxPix;
+  var maxPix=1.9e6, over=(cw*ch)/maxPix;
   if(over>1){ var k2=Math.sqrt(over); cw=Math.round(cw/k2); ch=Math.round(ch/k2); }
-  CW=cw; CH=ch; UNIT=Math.max(1, cw/1000);
+  CW=cw; CH2=ch;
   cv.width=cw; cv.height=ch;
-  scene.width=cw; scene.height=ch;
-  var d=2;
+  var d=4;
   for(var i=0;i<BL.length;i++){
     BL[i].width =Math.max(1,Math.round(cw/d));
     BL[i].height=Math.max(1,Math.round(ch/d));
-    BC[i].globalCompositeOperation='copy';
     BC[i].imageSmoothingEnabled=true;
     d*=2;
   }
+  BK=BL[0].width/cw;
 }
+var BK=0.25;
 addEventListener('resize',resize);
 addEventListener('orientationchange',function(){ setTimeout(resize,150); });
 
-/* ---------- ένα φύλλο ---------- */
-function sheet(g,M,f,off,P,CHN,R,cx,cy,t,lv,br,bright,motion){
-  var A=f.A, B=f.B, ph=f.ph+off*0.42, ph2=f.ph2+off*0.28;
-  var SOFT=0.80, SHELL=1.05+0.08*lv+0.04*br;
-  var hw0=f.hw*(1+0.20*lv+0.22*br);
-  var defo=f.defo*(0.42+lv*1.15)*motion;
-  var seed=f.seed+off*3.1, step=TAU/P, i, j;
+/* ---------- μία κορδέλα ---------- */
+var BANDS=5, PATHS=null;
+function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
+  var i,j,k,hh,ang,ca,sa,du=TAU/P, maxR=1e-6;
 
-  for(i=0;i<=P;i++){
-    var th=i*step;
-    var a=A*th+ph, b=B*th+ph2;
-    var sa=Math.sin(a), ca=Math.cos(a), cb=Math.cos(b), sb=Math.sin(b);
-    var Cx=sa*cb, Cy=sa*sb, Cz=ca;
-    /* εφαπτομένη (αναλυτικά) */
-    var Tx=A*ca*cb - B*sa*sb, Ty=A*ca*sb + B*sa*cb, Tz=-A*sa;
-    var tl=Math.sqrt(Tx*Tx+Ty*Ty+Tz*Tz)||1; Tx/=tl; Ty/=tl; Tz/=tl;
-    /* κάθετη στην καμπύλη, εφαπτομενική στη σφαίρα */
-    var Nx=Cy*Tz-Cz*Ty, Ny=Cz*Tx-Cx*Tz, Nz=Cx*Ty-Cy*Tx;
-    var nl=Math.sqrt(Nx*Nx+Ny*Ny+Nz*Nz)||1; Nx/=nl; Ny/=nl; Nz/=nl;
-    /* συστροφή του φύλλου */
-    var ps=f.tw*th + f.twp + t*f.tws + off*0.9;
-    var cp=Math.cos(ps), sp=Math.sin(ps);
-    sp*=0.62;
-    var Dx=cp*Nx+sp*Cx, Dy=cp*Ny+sp*Cy, Dz=cp*Nz+sp*Cz;
-
-    var wob=0.55*Math.sin(2*th+t*0.70+seed)+0.45*Math.sin(3*th-t*0.53+seed*1.7);
-    var rr=1+defo*wob+br*0.26*Math.sin(4*th+t*2.4+seed*2.1);
-    if(f.lobe) rr+=f.lobeA*Math.sin(f.lobe*th+f.twp);
-    var hw=hw0*(0.30+0.70*(0.5+0.5*Math.sin(f.hwm*th+f.hwp+t*0.22)))*(0.16+0.84*sa*sa);
-
-    var p1x=Cx*rr+hw*Dx, p1y=Cy*rr+hw*Dy, p1z=Cz*rr+hw*Dz;
-    var p2x=Cx*rr-hw*Dx, p2y=Cy*rr-hw*Dy, p2z=Cz*rr-hw*Dz;
-
-    /* το κέλυφος «αναπνέει» αλλά δεν σπάει: ό,τι περνάει το όριο
-       συμπιέζεται ομαλά προς αυτό — έτσι μένει πάντα σφαίρα */
-    var shell=SHELL*(1+0.09*lv*Math.sin(5*th+t*3.1+seed));
-    var L=Math.sqrt(p1x*p1x+p1y*p1y+p1z*p1z);
-    if(L>SOFT){ var q=(SOFT+(shell-SOFT)*(1-Math.exp(-(L-SOFT)/(shell-SOFT))))/L;
-                p1x*=q; p1y*=q; p1z*=q; }
-    L=Math.sqrt(p2x*p2x+p2y*p2y+p2z*p2z);
-    if(L>SOFT){ var q2=(SOFT+(shell-SOFT)*(1-Math.exp(-(L-SOFT)/(shell-SOFT))))/L;
-                p2x*=q2; p2y*=q2; p2z*=q2; }
-
-    var X=M[0]*p1x+M[1]*p1y+M[2]*p1z, Y=M[3]*p1x+M[4]*p1y+M[5]*p1z, Z=M[6]*p1x+M[7]*p1y+M[8]*p1z;
-    var pr=3.15/(3.15-Z);
-    ax[i]=cx+X*R*pr; ay[i]=cy+Y*R*pr; az[i]=Z;
-
-    X=M[0]*p2x+M[1]*p2y+M[2]*p2z; Y=M[3]*p2x+M[4]*p2y+M[5]*p2z; Z=M[6]*p2x+M[7]*p2y+M[8]*p2z;
-    pr=3.15/(3.15-Z);
-    bx[i]=cx+X*R*pr; by[i]=cy+Y*R*pr; bz[i]=Z;
-
-    /* δύο ενδιάμεσες ίνες: δίνουν υφή στη μεμβράνη */
-    mx[i]=ax[i]+(bx[i]-ax[i])*0.28; my[i]=ay[i]+(by[i]-ay[i])*0.28;
-    nx2[i]=ax[i]+(bx[i]-ax[i])*0.72; ny2[i]=ay[i]+(by[i]-ay[i])*0.72;
+  /* --- ο βρόχος --- */
+  for(i=0;i<P;i++){
+    var u=i*du, X=0,Y=0,Z=0;
+    for(k=0;k<3;k++){
+      hh=f.h[k];
+      ang=hh.k*u + hh.ph + t*hh.w*motion;
+      ca=Math.cos(ang); sa=Math.sin(ang);
+      X+=hh.ax*ca+hh.bx*sa; Y+=hh.ay*ca+hh.by*sa; Z+=hh.az*ca+hh.bz*sa;
+    }
+    var i3=i*3;
+    HC[i3]=X; HC[i3+1]=Y; HC[i3+2]=Z;
+    var rr=X*X+Y*Y+Z*Z; if(rr>maxR) maxR=rr;
+  }
+  /* σταθερό μέγεθος, και τράβηγμα προς το κέλυφος ώστε οι κορδέλες
+     να αγκαλιάζουν τη σφαίρα αντί να μπερδεύονται στο κέντρο */
+  var sc=0.82/Math.sqrt(maxR), SPH=0.78, RAD=0.86;
+  for(i=0;i<P;i++){
+    var q3=i*3;
+    var X2=HC[q3]*sc, Y2=HC[q3+1]*sc, Z2=HC[q3+2]*sc;
+    var Lc=Math.sqrt(X2*X2+Y2*Y2+Z2*Z2)||1;
+    var kk=(1-SPH)+SPH*(RAD/Lc);
+    HC[q3]=X2*kk; HC[q3+1]=Y2*kk; HC[q3+2]=Z2*kk;
   }
 
-  var gF=(70+70*lv)|0,  bF=(10+52*lv)|0;      /* μεμβράνη  */
-  var gE=(146+80*lv)|0, bE=(48+95*lv)|0;      /* ακμή      */
-  var fillA=0.026*bright, edgeA=0.300*bright;
-  var per=P/CHN, c2, i0, i1, zm, da;
+  var hwK=f.hw*(1+0.30*lv+0.25*br)*(1-0.26*calm);
+  var ripK=f.rip*(1+2.0*lv+1.3*br)*(1-0.45*calm);
+  var SOFT=0.82, SHELL=1.02+0.10*lv+0.05*br;
 
-  for(c2=0;c2<CHN;c2++){
-    i0=Math.round(c2*per); i1=Math.round((c2+1)*per);
-    zm=(az[(i0+i1)>>1]+bz[(i0+i1)>>1])*0.5;
-    da=0.12+0.88*Math.pow(zm*0.5+0.5,1.35);
+  for(i=0;i<=P;i++){
+    var ii=i%P, u2=i*du, q=ii*3;
+    var Cx=HC[q], Cy=HC[q+1], Cz=HC[q+2];
+    /* εφαπτομένη με κεντρική διαφορά — σωστή και μετά το τράβηγμα */
+    var a3=((ii+1)%P)*3, b3=((ii+P-1)%P)*3;
+    var Tx=HC[a3]-HC[b3], Ty=HC[a3+1]-HC[b3+1], Tz=HC[a3+2]-HC[b3+2];
+    var tl=Math.sqrt(Tx*Tx+Ty*Ty+Tz*Tz)||1; Tx/=tl; Ty/=tl; Tz/=tl;
 
-    g.fillStyle='rgba(255,'+gF+','+bF+','+(fillA*da).toFixed(4)+')';
-    g.beginPath(); g.moveTo(ax[i0],ay[i0]);
-    for(j=i0+1;j<=i1;j++) g.lineTo(ax[j],ay[j]);
-    for(j=i1;j>=i0;j--) g.lineTo(bx[j],by[j]);
-    g.closePath(); g.fill();
+    var e1x=Ty*Cz-Tz*Cy, e1y=Tz*Cx-Tx*Cz, e1z=Tx*Cy-Ty*Cx;
+    var el=Math.sqrt(e1x*e1x+e1y*e1y+e1z*e1z);
+    if(el<1e-4){ e1x=Ty; e1y=-Tx; e1z=0; el=Math.sqrt(e1x*e1x+e1y*e1y)||1; }
+    e1x/=el; e1y/=el; e1z/=el;
+    var e2x=Ty*e1z-Tz*e1y, e2y=Tz*e1x-Tx*e1z, e2z=Tx*e1y-Ty*e1x;
 
-    g.strokeStyle='rgba(255,'+gE+','+bE+','+(edgeA*da).toFixed(4)+')';
-    g.lineWidth=(0.75+0.65*(zm*0.5+0.5))*UNIT;
-    g.beginPath(); g.moveTo(ax[i0],ay[i0]);
-    for(j=i0+1;j<=i1;j++) g.lineTo(ax[j],ay[j]);
-    g.stroke();
-    g.beginPath(); g.moveTo(bx[i0],by[i0]);
-    for(j=i0+1;j<=i1;j++) g.lineTo(bx[j],by[j]);
-    g.stroke();
+    var psi=f.tw*u2 + f.twp + t*f.tws*motion;
+    var cw2=Math.cos(psi), sw2=Math.sin(psi);
+    var Wx=cw2*e1x+sw2*e2x, Wy=cw2*e1y+sw2*e2y, Wz=cw2*e1z+sw2*e2z;
+    var Nx=cw2*e2x-sw2*e1x, Ny=cw2*e2y-sw2*e1y, Nz=cw2*e2z-sw2*e1z;
 
-    g.strokeStyle='rgba(255,'+gE+','+bE+','+(edgeA*0.34*da).toFixed(4)+')';
-    g.lineWidth=0.6*UNIT;
-    g.beginPath(); g.moveTo(mx[i0],my[i0]);
-    for(j=i0+1;j<=i1;j++) g.lineTo(mx[j],my[j]);
-    g.stroke();
-    g.beginPath(); g.moveTo(nx2[i0],ny2[i0]);
-    for(j=i0+1;j<=i1;j++) g.lineTo(nx2[j],ny2[j]);
-    g.stroke();
+    var hw=hwK*(0.58+0.42*Math.sin(f.hwm*u2+f.hwp));
 
-    /* λευκός πυρήνας μόνο στις μπροστινές ακμές → κοφτερή φωτεινή ίνα */
-    if(zm>0.05){
-      var hot=(zm-0.05)/0.95;
-      g.strokeStyle='rgba(255,'+(196+50*lv)+','+(140+90*lv)+','+(edgeA*0.62*hot).toFixed(4)+')';
-      g.lineWidth=0.55*UNIT;
-      g.beginPath(); g.moveTo(ax[i0],ay[i0]);
-      for(j=i0+1;j<=i1;j++) g.lineTo(ax[j],ay[j]);
-      g.stroke();
-      g.beginPath(); g.moveTo(bx[i0],by[i0]);
-      for(j=i0+1;j<=i1;j++) g.lineTo(bx[j],by[j]);
-      g.stroke();
+    for(j=0;j<=S;j++){
+      var w=(j/S)*2-1;
+      w=(w<0?-1:1)*Math.pow(Math.abs(w),0.72);
+      var rip=ripK*Math.sin(f.ripk*u2 - t*f.ripw*(0.6+1.3*lv)*motion + 0.7*w + f.ripp);
+      var px=Cx+w*hw*Wx+rip*Nx, py=Cy+w*hw*Wy+rip*Ny, pz=Cz+w*hw*Wz+rip*Nz;
+
+      var L=Math.sqrt(px*px+py*py+pz*pz);
+      if(L>SOFT){
+        var qq=(SOFT+(SHELL-SOFT)*(1-Math.exp(-(L-SOFT)/(SHELL-SOFT))))/L;
+        px*=qq; py*=qq; pz*=qq;
+      }
+      var vx=M[0]*px+M[1]*py+M[2]*pz,
+          vy=M[3]*px+M[4]*py+M[5]*pz,
+          vz=M[6]*px+M[7]*py+M[8]*pz;
+      var id=i*(S+1)+j;
+      VX[id]=vx; VY[id]=vy; VZ[id]=vz;
+      var pr=3.3/(3.3-vz);
+      SX[id]=cx+vx*R*pr; SY[id]=cy+vy*R*pr;
+    }
+  }
+
+  /* --- σχεδίαση: η κορδέλα είναι δέσμη παράλληλων ινών φωτός.
+     Από την κόψη πέφτουν η μία πάνω στην άλλη και η τσάκιση ανάβει
+     λευκή· κατά μέτωπο απλώνονται σε διάφανο ύφασμα με ραβδώσεις.
+     Οι ίνες μπαίνουν σε λίγες διαδρομές ανά ζώνη βάθους, ώστε όλο το
+     καρέ να βγαίνει με δέκα πινελιές αντί για εκατοντάδες. --- */
+  var per=P/NCH, c2, i0, i1, im, zb, pth;
+  for(j=0;j<=S;j++){
+    var eg=(j===0||j===S)?BANDS:0;
+    for(c2=0;c2<NCH;c2++){
+      i0=Math.round(c2*per); i1=Math.round((c2+1)*per); if(i1<=i0) continue;
+      im=(i0+i1)>>1;
+      zb=(VZ[im*(S+1)+j]*0.5+0.5)*BANDS|0;
+      if(zb<0) zb=0; if(zb>=BANDS) zb=BANDS-1;
+      pth=PATHS[eg+zb];
+      pth.moveTo(SX[i0*(S+1)+j], SY[i0*(S+1)+j]);
+      for(i=i0+1;i<=i1;i++) pth.lineTo(SX[i*(S+1)+j], SY[i*(S+1)+j]);
     }
   }
 }
 
-/* ---------- λάμψη σημείου (αστέρι) ---------- */
-function flare(g,x,y,r,a){
-  if(a<=0.004||r<=0) return;
-  var gr=g.createRadialGradient(x,y,0,x,y,r);
-  gr.addColorStop(0,   'rgba(255,244,220,'+(a).toFixed(3)+')');
-  gr.addColorStop(0.22,'rgba(255,178,84,'+(a*0.42).toFixed(3)+')');
-  gr.addColorStop(1,   'rgba(255,120,20,0)');
-  g.fillStyle=gr; g.beginPath(); g.arc(x,y,r,0,TAU); g.fill();
-  var lg=g.createLinearGradient(x-r*3.4,y,x+r*3.4,y);
-  lg.addColorStop(0,'rgba(255,150,40,0)');
-  lg.addColorStop(0.5,'rgba(255,230,180,'+(a*0.55).toFixed(3)+')');
-  lg.addColorStop(1,'rgba(255,150,40,0)');
-  g.fillStyle=lg; g.fillRect(x-r*3.4, y-r*0.045, r*6.8, r*0.09);
-  var lv2=g.createLinearGradient(x,y-r*2.3,x,y+r*2.3);
-  lv2.addColorStop(0,'rgba(255,150,40,0)');
-  lv2.addColorStop(0.5,'rgba(255,230,180,'+(a*0.45).toFixed(3)+')');
-  lv2.addColorStop(1,'rgba(255,150,40,0)');
-  g.fillStyle=lv2; g.fillRect(x-r*0.045, y-r*2.3, r*0.09, r*4.6);
+/* οι συγκεντρωμένες διαδρομές: μία πινελιά ανά ζώνη */
+function strokeBundles(g,lv,bright,lw){
+  var gi,bi,dep,al,gg,bb,edge;
+  for(gi=0;gi<2;gi++){
+    edge=(gi===1);
+    for(bi=0;bi<BANDS;bi++){
+      dep=0.22+0.78*((bi+0.5)/BANDS);
+      al=(edge?0.215:0.088)*dep*bright;
+      if(al<0.003) continue;
+      if(al>0.5) al=0.5;
+      gg=(108+38*lv+(edge?34:0))|0; bb=(16+40*lv+(edge?22:0))|0;
+      if(gg>255) gg=255; if(bb>255) bb=255;
+      g.strokeStyle='rgba(255,'+gg+','+bb+','+al.toFixed(4)+')';
+      g.lineWidth=lw;   /* = 1 εικονοστοιχείο συσκευής */
+      g.stroke(PATHS[(edge?BANDS:0)+bi]);
+    }
+  }
 }
 
-/* ---------- ένα καρέ ---------- */
+/* ---------- ένα καρέ ----------
+   Οι ίνες χτίζονται μία φορά σε συντεταγμένες οθόνης και ζωγραφίζονται
+   δύο φορές: κανονικά, και σμικρυμένες στον καμβά της λάμψης. Έτσι δεν
+   χρειάζεται ποτέ να διαβαστεί ολόκληρη η εικόνα για θόλωμα.          */
 var yaw=0, roll=0, tGlob=0;
 function drawScene(t,dt,lv,br){
-  var g=sctx, Q=TIER[tier];
+  var Q=TIER[tier];
   var sizeK=parseFloat($('sSize').value), glowK=parseFloat($('sGlow').value),
       motion=parseFloat($('sMot').value)*(reduce?0.55:1);
 
-  g.globalCompositeOperation='source-over';
-  g.fillStyle='#000'; g.fillRect(0,0,CW,CH);
-  g.globalCompositeOperation='lighter';
-  g.lineCap='round'; g.lineJoin='round';
-
-  /* αιώρηση: αργή μετατόπιση + «ανάσα» + ελαφριά αλλαγή απόστασης */
   var fl = reduce?0.35:1;
-  var cx = CW*0.5 + (Math.sin(t*0.23)*0.018 + Math.sin(t*0.11+1.3)*0.011)*CW*fl;
-  var cy = CH*0.5 + (Math.cos(t*0.19+0.7)*0.022 + Math.sin(t*0.13)*0.010)*CH*fl;
-  var breath = 1 + 0.026*Math.sin(t*0.75) + 0.016*Math.sin(t*0.31+2.0);
-  var driftZ = 1 + 0.038*Math.sin(t*0.16+2.1)*fl;
+  var cx = CW*0.5 + (Math.sin(t*0.23)*0.017 + Math.sin(t*0.11+1.3)*0.010)*CW*fl;
+  var cy = CH2*0.5 + (Math.cos(t*0.19+0.7)*0.021 + Math.sin(t*0.13)*0.009)*CH2*fl;
+  var breath = 1 + 0.024*Math.sin(t*0.75) + 0.015*Math.sin(t*0.31+2.0);
+  var driftZ = 1 + 0.036*Math.sin(t*0.16+2.1)*fl;
 
-  /* ακούει → μαζεύεται ελαφρά· μιλάει → ανοίγει με κάθε συλλαβή */
-  var R = Math.min(CW,CH)*0.275*sizeK*breath*driftZ
-        * (1 - 0.075*mixListen)
-        * (1 + 0.15*lv + 0.09*br);
+  var R = Math.min(CW,CH2)*0.335*sizeK*breath*driftZ
+        * (1 - 0.070*mixListen)
+        * (1 + 0.13*lv + 0.08*br);
 
-  var spin = (0.055 + 0.30*lv + 0.10*mixSpeak) * motion;
-  yaw  += dt*spin;
-  roll += dt*spin*0.34;
-  var pitch = 0.20*Math.sin(t*0.21)*fl + 0.10*Math.sin(t*0.07+1.1);
+  /* πολύ αργή μετατόπιση θέασης — η κίνηση έρχεται από το κυμάτισμα */
+  var spin=(0.020+0.045*lv)*motion;
+  yaw += dt*spin; roll += dt*spin*0.5;
+  var pitch=0.11*Math.sin(t*0.13)*fl;
   var MG = mul(mul(rotY(yaw), rotX(pitch)), rotZ(roll));
 
-  var bright = (0.95 + 1.00*lv + 0.28*mixListen + 0.35*br) * glowK;
+  var bright=(1.00+0.52*lv+0.22*mixListen+0.35*br)*glowK;
 
-  var n=Q.sheets, i, o, f, M;
-  for(i=0;i<n;i++){
-    f=SHEET[i];
-    if(!f.fixPh) f.ph += dt*f.drift*(0.55+2.0*lv)*motion;
-    f.ph2 += dt*f.drift*(f.fixPh?1:0.62)*(0.55+1.6*lv)*motion;
-    M = mul(MG, f.M0);
-    var cop = f.cop + (mixListen>0.5?0:0);
-    for(o=0;o<cop;o++){
-      /* στο «ακούει» τα φύλλα μαζεύονται και συμπίπτουν → πιο εστιασμένο */
-      var offs = (cop===1?0:(o?1:-1)) * (1-0.55*mixListen);
-      sheet(g,M,f,offs,Q.P,Q.chunks,R,cx,cy,t,lv,br,bright,motion);
-    }
-    if(i<3){
-      var ps=[1,-1], q;
-      for(q=0;q<2;q++){
-        var zz=ps[q];
-        var X=M[2]*zz, Y=M[5]*zz, Z=M[8]*zz;
-        var pr=3.15/(3.15-Z);
-        var al=(0.05+0.32*lv+0.08*mixListen)*(0.35+0.65*(Z*0.5+0.5))*glowK;
-        flare(g, cx+X*R*pr, cy+Y*R*pr, R*(0.07+0.06*lv), al*0.8);
-      }
-    }
-  }
+  PATHS=[]; for(var pi=0;pi<BANDS*2;pi++) PATHS.push(new Path2D());
+  for(var i=0;i<Q.ribs;i++)
+    ribbon(MG,RIB[i],Q.P,Q.CH,Q.S,R,cx,cy,t,lv,br,motion,mixListen);
 
-  /* θερμός πυρήνας + άλως */
-  var core=g.createRadialGradient(cx,cy,0,cx,cy,R*1.05);
-  core.addColorStop(0,   'rgba(255,200,128,'+((0.05+0.30*lv+0.05*mixListen)*glowK).toFixed(3)+')');
-  core.addColorStop(0.55,'rgba(255,132,32,'+((0.02+0.14*lv)*glowK).toFixed(3)+')');
+  /* 1. ορατός καμβάς */
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,CW,CH2);
+  ctx.globalCompositeOperation='lighter';
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  strokeBundles(ctx,lv,bright,1);
+
+  /* 2. καμβάς λάμψης στο 1/4 — εδώ μπαίνουν και οι απαλές βαθμίδες,
+     που σε πλήρη ανάλυση θα κόστιζαν όσο όλη η υπόλοιπη σκηνή */
+  var g2=BC[0], w2=BL[0].width, h2=BL[0].height;
+  g2.setTransform(1,0,0,1,0,0);
+  g2.globalCompositeOperation='source-over';
+  g2.fillStyle='#000'; g2.fillRect(0,0,w2,h2);
+  g2.globalCompositeOperation='lighter';
+  g2.lineCap='round'; g2.lineJoin='round';
+  g2.setTransform(BK,0,0,BK,0,0);
+  strokeBundles(g2,lv,bright,1/BK);
+
+  var core=g2.createRadialGradient(cx,cy,0,cx,cy,R*1.05);
+  core.addColorStop(0,   'rgba(255,198,124,'+((0.09+0.44*lv+0.08*mixListen)*glowK).toFixed(3)+')');
+  core.addColorStop(0.55,'rgba(255,132,32,'+((0.03+0.20*lv)*glowK).toFixed(3)+')');
   core.addColorStop(1,   'rgba(255,110,20,0)');
-  g.fillStyle=core; g.beginPath(); g.arc(cx,cy,R*1.05,0,TAU); g.fill();
+  g2.fillStyle=core; g2.beginPath(); g2.arc(cx,cy,R*1.05,0,TAU); g2.fill();
 
-  var hr=R*(1.9+0.9*lv);
-  var halo=g.createRadialGradient(cx,cy,R*0.9,cx,cy,hr);
-  halo.addColorStop(0,'rgba(255,140,42,'+((0.05+0.10*lv)*glowK).toFixed(3)+')');
+  var hr=R*(1.75+0.8*lv);
+  var halo=g2.createRadialGradient(cx,cy,R*0.9,cx,cy,hr);
+  halo.addColorStop(0,'rgba(255,138,40,'+((0.07+0.17*lv)*glowK).toFixed(3)+')');
   halo.addColorStop(1,'rgba(255,110,20,0)');
-  g.fillStyle=halo; g.beginPath(); g.arc(cx,cy,hr,0,TAU); g.fill();
+  g2.fillStyle=halo; g2.beginPath(); g2.arc(cx,cy,hr,0,TAU); g2.fill();
+  g2.setTransform(1,0,0,1,0,0);
 }
 
 function composite(lv){
   var glowK=parseFloat($('sGlow').value);
-  BC[0].drawImage(scene, 0,0, BL[0].width, BL[0].height);
+  /* θόλωμα με δύο ακόμη σμικρύνσεις, που τις ξαναγράφουμε πάνω στο 1/4 */
+  BC[1].globalCompositeOperation='copy';
   BC[1].drawImage(BL[0], 0,0, BL[1].width, BL[1].height);
+  BC[2].globalCompositeOperation='copy';
   BC[2].drawImage(BL[1], 0,0, BL[2].width, BL[2].height);
-  ctx.globalCompositeOperation='source-over';
-  ctx.globalAlpha=1; ctx.drawImage(scene,0,0,CW,CH);
+  BC[0].globalCompositeOperation='lighter';
+  BC[0].globalAlpha=0.85; BC[0].drawImage(BL[1],0,0,BL[0].width,BL[0].height);
+  BC[0].globalAlpha=0.75; BC[0].drawImage(BL[2],0,0,BL[0].width,BL[0].height);
+  BC[0].globalAlpha=1;
+  /* μία και μόνη επίστρωση σε πλήρη ανάλυση */
   ctx.globalCompositeOperation='lighter';
-  var k=(0.85+0.55*lv)*glowK;
-  ctx.globalAlpha=Math.min(1,0.50*k); ctx.drawImage(BL[0],0,0,CW,CH);
-  ctx.globalAlpha=Math.min(1,0.40*k); ctx.drawImage(BL[2],0,0,CW,CH);
+  ctx.globalAlpha=Math.min(1,(0.80+0.45*lv)*glowK);
+  ctx.drawImage(BL[0],0,0,CW,CH2);
   ctx.globalAlpha=1;
+  ctx.globalCompositeOperation='source-over';
 }
 
 /* ==================================================================
