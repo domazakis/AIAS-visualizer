@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>ΑΙΑΣ — δοκιμή κίνησης</title>
+<style>
+  :root{ --amber:#ffb63f; --dim:#7d6a55; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:#000}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#e8dcc9}
+
+  #cv{position:fixed;inset:0;display:block;width:100%;height:100%}
+
+  /* ---------- wordmark ---------- */
+  #mark{
+    position:fixed;top:max(14px,env(safe-area-inset-top));left:0;right:0;z-index:8;
+    text-align:center;font-size:11px;letter-spacing:.5em;color:#6b5a48;
+    text-transform:uppercase;pointer-events:none;margin-left:.5em;
+    transition:opacity .5s ease;
+  }
+
+  /* ---------- caption ---------- */
+  #cap{
+    position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));z-index:9;
+    display:flex;flex-direction:column;align-items:center;gap:9px;
+    padding:0 22px;pointer-events:none;transition:opacity .45s ease;
+  }
+  #cap.off{opacity:0}
+  #who{
+    font-size:10px;letter-spacing:.34em;text-transform:uppercase;
+    display:flex;align-items:center;gap:9px;color:#8d7860;margin-left:.34em;
+  }
+  #who b{font-weight:600}
+  #who .tag{
+    font-size:9px;letter-spacing:.2em;padding:3px 9px;border-radius:99px;
+    border:1px solid rgba(255,150,50,.28);color:#c98f4e;margin-left:.2em;
+  }
+  #line{
+    font-size:clamp(15px,4.2vw,21px);line-height:1.45;text-align:center;
+    max-width:640px;color:#f0e2cd;text-shadow:0 2px 20px rgba(0,0,0,.9);
+  }
+  #line.you{color:#cfd8e8}
+  #bar{width:min(340px,72vw);height:2px;background:rgba(255,255,255,.09);border-radius:2px;overflow:hidden;opacity:0}
+  #bar.on{opacity:1}
+  #bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ff8a1e,#ffce7a)}
+  #hint{font-size:11px;color:#5d5040;letter-spacing:.06em}
+
+  /* ---------- overlay ---------- */
+  #ov{
+    position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.82);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:16px;text-align:center;padding:30px;transition:opacity .6s ease;
+  }
+  #ov.hidden{opacity:0;pointer-events:none}
+  #ov h1{font-size:15px;font-weight:600;letter-spacing:.45em;color:var(--amber);
+    text-transform:uppercase;text-shadow:0 0 22px rgba(255,150,50,.5);margin-left:.45em}
+  #ov h2{font-size:12px;font-weight:400;letter-spacing:.26em;color:#7d6a55;text-transform:uppercase;margin-top:-6px}
+  #ov p{font-size:14px;line-height:1.6;max-width:340px;color:#a89684}
+  #ov .small{font-size:11.5px;color:#5d5040;max-width:320px}
+  .btn{
+    border:1px solid rgba(255,150,50,.45);background:rgba(255,140,40,.07);color:#f0d6b4;
+    font-size:14px;letter-spacing:.1em;padding:13px 36px;border-radius:999px;cursor:pointer;
+    font-family:inherit;transition:background .2s;
+  }
+  .btn:active{background:rgba(255,140,40,.2)}
+  .btn:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+  /* ---------- panel ---------- */
+  #gear{
+    position:fixed;top:max(10px,env(safe-area-inset-top));right:12px;z-index:15;
+    width:44px;height:44px;border-radius:50%;border:none;background:transparent;
+    color:#6b5a48;font-size:19px;cursor:pointer;opacity:.4;transition:opacity .4s;
+  }
+  #gear.faded{opacity:0;pointer-events:none}
+  #gear:focus-visible{outline:2px solid var(--amber);opacity:1}
+  #panel{
+    position:fixed;top:60px;right:12px;z-index:16;width:min(290px,88vw);
+    background:rgba(8,6,4,.95);border:1px solid rgba(255,150,50,.22);border-radius:16px;
+    padding:16px;display:none;flex-direction:column;gap:13px;
+    max-height:calc(100vh - 80px);overflow-y:auto;
+  }
+  #panel.open{display:flex}
+  #panel h3{font-size:10px;letter-spacing:.24em;color:#7d6a55;text-transform:uppercase;font-weight:600}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+  .sb{
+    border:1px solid rgba(255,150,50,.24);background:transparent;color:#c8b49a;
+    font-size:12px;padding:9px 4px;border-radius:9px;cursor:pointer;font-family:inherit;
+  }
+  .sb.act{background:rgba(255,140,40,.18);color:#ffd9a8;border-color:rgba(255,150,50,.6)}
+  #panel label{font-size:11px;color:#8d7860;display:flex;flex-direction:column;gap:5px}
+  #panel input[type=range]{width:100%;accent-color:var(--amber)}
+  .tog{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#a89684}
+  .tog input{width:18px;height:18px;accent-color:var(--amber)}
+  #panel .note{font-size:10.5px;color:#5d5040;line-height:1.5}
+</style>
+</head>
+<body>
+
+<canvas id="cv"></canvas>
+<div id="mark">ΑΙΑΣ</div>
+
+<div id="ov">
+  <h1>ΑΙΑΣ</h1>
+  <h2>δοκιμή κίνησης</h2>
+  <p>Θα εμφανιστεί μια φράση για να την πεις δυνατά. Ο Αίας απαντάει και βλέπεις πώς κινείται η σφαίρα: σιωπή, ακρόαση, ομιλία σε τρεις εντάσεις.</p>
+  <button class="btn" id="go">Έναρξη</button>
+  <p class="small">Χωρίς μικρόφωνο σε αυτή τη φάση. Με το ⚙ επάνω δεξιά αλλάζεις κατάσταση χειροκίνητα.</p>
+</div>
+
+<div id="cap">
+  <div id="who"><b>ΑΙΑΣ</b><span class="tag">ΣΙΩΠΗ</span></div>
+  <div id="line"></div>
+  <div id="bar"><i></i></div>
+  <div id="hint"></div>
+</div>
+
+<button id="gear" aria-label="Ρυθμίσεις">⚙</button>
+
+<div id="panel">
+  <h3>Καταστάσεις</h3>
+  <div class="row">
+    <button class="sb" data-st="auto">Σενάριο</button>
+    <button class="sb" data-st="idle">Σιωπή</button>
+  </div>
+  <div class="row">
+    <button class="sb" data-st="listen">Ακούει</button>
+    <button class="sb" data-st="low">Μιλάει · χαμηλά</button>
+  </div>
+  <div class="row">
+    <button class="sb" data-st="mid">Μιλάει · μεσαία</button>
+    <button class="sb" data-st="high">Μιλάει · υψηλά</button>
+  </div>
+
+  <h3>Εμφάνιση</h3>
+  <label>Μέγεθος <input type="range" id="sSize" min="0.6" max="1.5" step="0.02" value="1"></label>
+  <label>Λάμψη <input type="range" id="sGlow" min="0.3" max="2" step="0.05" value="1"></label>
+  <label>Ένταση κίνησης <input type="range" id="sMot" min="0.4" max="1.8" step="0.05" value="1"></label>
+
+  <h3>Δοκιμή</h3>
+  <div class="tog"><span>Φωνή (TTS)</span><input type="checkbox" id="tTts" checked></div>
+  <div class="tog"><span>Λεζάντες</span><input type="checkbox" id="tCap" checked></div>
+  <button class="sb" id="again">Επανάληψη σεναρίου</button>
+  <p class="note">Η δοκιμή δεν χρησιμοποιεί μικρόφωνο. Η κίνηση παράγεται από συνθετικό «περίγραμμα φωνής» — την ίδια είσοδο που αργότερα θα δίνει ο agent του ElevenLabs και το μικρόφωνο.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+var TAU = Math.PI*2, $ = function(i){ return document.getElementById(i); };
+var cv=$('cv'), ctx=cv.getContext('2d',{alpha:false});
+var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ==================================================================
+   1. ΚΑΤΑΣΤΑΣΗ  —  όλη η κίνηση εξαρτάται από δύο μόνο μεγέθη:
+        level  0..1  = στιγμιαία ένταση φωνής
+        mode          = 'idle' | 'listen' | 'speak'
+   Αργότερα το level θα έρχεται από τον AnalyserNode (μικρόφωνο ή
+   ροή του ElevenLabs) — τίποτα άλλο δεν αλλάζει.
+   ================================================================== */
+var mode='idle', level=0, levelT=0, extLevel=0, burst=0;
+var mixListen=0, mixSpeak=0;
+
+/* ==================================================================
+   2. ΓΕΩΜΕΤΡΙΑ — «φύλλα φωτός».
+   Κάθε φύλλο είναι μια ταινία γύρω από μια σφαιρική καμπύλη, που
+   συστρέφεται από εφαπτομενική σε ακτινική. Όταν είναι κατά μέτωπο
+   φαίνεται σαν διάφανη μεμβράνη· όταν είναι από την κόψη, σαν
+   φωτεινή γραμμή. Από εκεί βγαίνουν οι πτυχές της αναφοράς.
+   ================================================================== */
+function rndSeed(s){ return function(){ s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff; }; }
+var rnd = rndSeed(20260827);
+
+function rotX(a){var c=Math.cos(a),s=Math.sin(a);return [1,0,0, 0,c,-s, 0,s,c];}
+function rotY(a){var c=Math.cos(a),s=Math.sin(a);return [c,0,s, 0,1,0, -s,0,c];}
+function rotZ(a){var c=Math.cos(a),s=Math.sin(a);return [c,-s,0, s,c,0, 0,0,1];}
+function mul(a,b){
+  var o=new Float64Array(9),i,j;
+  for(i=0;i<3;i++) for(j=0;j<3;j++)
+    o[i*3+j]=a[i*3]*b[j]+a[i*3+1]*b[3+j]+a[i*3+2]*b[6+j];
+  return o;
+}
+
+/*  A,B  = σχήμα της καμπύλης πάνω στη σφαίρα
+    hw   = μισό πλάτος ταινίας      hwm/hwp = πού στενεύει και πού ανοίγει
+    tw   = συστροφές ανά κύκλο      tws     = αργή περιστροφή της συστροφής
+    cop  = διπλό φύλλο (πιο πλούσια πτυχή)                                */
+var SHEET = [
+  /* δύο δακτύλιοι → καθαρό, φωτεινό περίγραμμα με ήπιο τρίλοβο σχήμα */
+  {A:0, B:1, hw:0.10, hwm:2, tw:0, tws:0, defo:0.035, lobe:3, lobeA:0.070, drift: 0.13, cop:1, lat:1.5708},
+  {A:0, B:1, hw:0.13, hwm:3, tw:0, tws:0, defo:0.030, lobe:2, lobeA:0.055, drift:-0.10, cop:1, lat:1.5708},
+  /* φύλλα που σαρώνουν το εσωτερικό — φαρδιά, ώστε να διαβάζονται ως επιφάνειες */
+  {A:1, B:2, hw:0.22, hwm:2, tw:2, tws: 0.11, defo:0.050, drift: 0.052, cop:1},
+  {A:1, B:3, hw:0.25, hwm:2, tw:2, tws:-0.09, defo:0.045, drift:-0.040, cop:1},
+  {A:2, B:3, hw:0.28, hwm:3, tw:3, tws: 0.13, defo:0.055, drift: 0.033, cop:1},
+  {A:2, B:5, hw:0.19, hwm:2, tw:2, tws:-0.07, defo:0.050, drift:-0.026, cop:1},
+  {A:1, B:5, hw:0.16, hwm:3, tw:2, tws: 0.08, defo:0.045, drift: 0.021, cop:1}
+];
+SHEET.forEach(function(f){
+  f.ph=(f.lat!=null?f.lat:rnd()*TAU); f.ph2=rnd()*TAU; f.twp=rnd()*TAU; f.hwp=rnd()*TAU;
+  f.fixPh=(f.lat!=null);
+  f.seed=rnd()*10;
+  f.M0=mul(mul(rotY(rnd()*TAU), rotX(rnd()*TAU)), rotZ(rnd()*TAU));
+});
+
+/* ---------- ποιότητα: προσαρμόζεται μόνη της ---------- */
+var TIER=[
+  {sheets:4, P:104, chunks:6},
+  {sheets:6, P:156, chunks:8},
+  {sheets:7, P:208, chunks:10}
+];
+var tier = (matchMedia('(pointer:coarse)').matches ? 1 : 2);
+var MAXP = 216;
+var ax=new Float32Array(MAXP+2), ay=new Float32Array(MAXP+2), az=new Float32Array(MAXP+2);
+var bx=new Float32Array(MAXP+2), by=new Float32Array(MAXP+2), bz=new Float32Array(MAXP+2);
+var mx=new Float32Array(MAXP+2), my=new Float32Array(MAXP+2);
+var nx2=new Float32Array(MAXP+2), ny2=new Float32Array(MAXP+2);
+
+/* ---------- καμβάδες: σκηνή + αλυσίδα λάμψης ---------- */
+var scene=document.createElement('canvas'), sctx=scene.getContext('2d',{alpha:false});
+var BL=[], BC=[];
+for(var k=0;k<4;k++){ var c=document.createElement('canvas'); BL.push(c); BC.push(c.getContext('2d')); }
+var CW=0, CH=0, UNIT=1;
+
+function resize(){
+  var dpr=Math.min(window.devicePixelRatio||1, 2);
+  var w=Math.max(1,cv.clientWidth), h=Math.max(1,cv.clientHeight);
+  var cw=Math.round(w*dpr), ch=Math.round(h*dpr);
+  var maxPix=2.3e6, over=(cw*ch)/maxPix;
+  if(over>1){ var k2=Math.sqrt(over); cw=Math.round(cw/k2); ch=Math.round(ch/k2); }
+  CW=cw; CH=ch; UNIT=Math.max(1, cw/1000);
+  cv.width=cw; cv.height=ch;
+  scene.width=cw; scene.height=ch;
+  var d=2;
+  for(var i=0;i<BL.length;i++){
+    BL[i].width =Math.max(1,Math.round(cw/d));
+    BL[i].height=Math.max(1,Math.round(ch/d));
+    BC[i].globalCompositeOperation='copy';
+    BC[i].imageSmoothingEnabled=true;
+    d*=2;
+  }
+}
+addEventListener('resize',resize);
+addEventListener('orientationchange',function(){ setTimeout(resize,150); });
+
+/* ---------- ένα φύλλο ---------- */
+function sheet(g,M,f,off,P,CHN,R,cx,cy,t,lv,br,bright,motion){
+  var A=f.A, B=f.B, ph=f.ph+off*0.42, ph2=f.ph2+off*0.28;
+  var SOFT=0.80, SHELL=1.05+0.08*lv+0.04*br;
+  var hw0=f.hw*(1+0.20*lv+0.22*br);
+  var defo=f.defo*(0.42+lv*1.15)*motion;
+  var seed=f.seed+off*3.1, step=TAU/P, i, j;
+
+  for(i=0;i<=P;i++){
+    var th=i*step;
+    var a=A*th+ph, b=B*th+ph2;
+    var sa=Math.sin(a), ca=Math.cos(a), cb=Math.cos(b), sb=Math.sin(b);
+    var Cx=sa*cb, Cy=sa*sb, Cz=ca;
+    /* εφαπτομένη (αναλυτικά) */
+    var Tx=A*ca*cb - B*sa*sb, Ty=A*ca*sb + B*sa*cb, Tz=-A*sa;
+    var tl=Math.sqrt(Tx*Tx+Ty*Ty+Tz*Tz)||1; Tx/=tl; Ty/=tl; Tz/=tl;
+    /* κάθετη στην καμπύλη, εφαπτομενική στη σφαίρα */
+    var Nx=Cy*Tz-Cz*Ty, Ny=Cz*Tx-Cx*Tz, Nz=Cx*Ty-Cy*Tx;
+    var nl=Math.sqrt(Nx*Nx+Ny*Ny+Nz*Nz)||1; Nx/=nl; Ny/=nl; Nz/=nl;
+    /* συστροφή του φύλλου */
+    var ps=f.tw*th + f.twp + t*f.tws + off*0.9;
+    var cp=Math.cos(ps), sp=Math.sin(ps);
+    sp*=0.62;
+    var Dx=cp*Nx+sp*Cx, Dy=cp*Ny+sp*Cy, Dz=cp*Nz+sp*Cz;
+
+    var wob=0.55*Math.sin(2*th+t*0.70+seed)+0.45*Math.sin(3*th-t*0.53+seed*1.7);
+    var rr=1+defo*wob+br*0.26*Math.sin(4*th+t*2.4+seed*2.1);
+    if(f.lobe) rr+=f.lobeA*Math.sin(f.lobe*th+f.twp);
+    var hw=hw0*(0.30+0.70*(0.5+0.5*Math.sin(f.hwm*th+f.hwp+t*0.22)))*(0.16+0.84*sa*sa);
+
+    var p1x=Cx*rr+hw*Dx, p1y=Cy*rr+hw*Dy, p1z=Cz*rr+hw*Dz;
+    var p2x=Cx*rr-hw*Dx, p2y=Cy*rr-hw*Dy, p2z=Cz*rr-hw*Dz;
+
+    /* το κέλυφος «αναπνέει» αλλά δεν σπάει: ό,τι περνάει το όριο
+       συμπιέζεται ομαλά προς αυτό — έτσι μένει πάντα σφαίρα */
+    var shell=SHELL*(1+0.09*lv*Math.sin(5*th+t*3.1+seed));
+    var L=Math.sqrt(p1x*p1x+p1y*p1y+p1z*p1z);
+    if(L>SOFT){ var q=(SOFT+(shell-SOFT)*(1-Math.exp(-(L-SOFT)/(shell-SOFT))))/L;
+                p1x*=q; p1y*=q; p1z*=q; }
+    L=Math.sqrt(p2x*p2x+p2y*p2y+p2z*p2z);
+    if(L>SOFT){ var q2=(SOFT+(shell-SOFT)*(1-Math.exp(-(L-SOFT)/(shell-SOFT))))/L;
+                p2x*=q2; p2y*=q2; p2z*=q2; }
+
+    var X=M[0]*p1x+M[1]*p1y+M[2]*p1z, Y=M[3]*p1x+M[4]*p1y+M[5]*p1z, Z=M[6]*p1x+M[7]*p1y+M[8]*p1z;
+    var pr=3.15/(3.15-Z);
+    ax[i]=cx+X*R*pr; ay[i]=cy+Y*R*pr; az[i]=Z;
+
+    X=M[0]*p2x+M[1]*p2y+M[2]*p2z; Y=M[3]*p2x+M[4]*p2y+M[5]*p2z; Z=M[6]*p2x+M[7]*p2y+M[8]*p2z;
+    pr=3.15/(3.15-Z);
+    bx[i]=cx+X*R*pr; by[i]=cy+Y*R*pr; bz[i]=Z;
+
+    /* δύο ενδιάμεσες ίνες: δίνουν υφή στη μεμβράνη */
+    mx[i]=ax[i]+(bx[i]-ax[i])*0.28; my[i]=ay[i]+(by[i]-ay[i])*0.28;
+    nx2[i]=ax[i]+(bx[i]-ax[i])*0.72; ny2[i]=ay[i]+(by[i]-ay[i])*0.72;
+  }
+
+  var gF=(70+70*lv)|0,  bF=(10+52*lv)|0;      /* μεμβράνη  */
+  var gE=(146+80*lv)|0, bE=(48+95*lv)|0;      /* ακμή      */
+  var fillA=0.026*bright, edgeA=0.300*bright;
+  var per=P/CHN, c2, i0, i1, zm, da;
+
+  for(c2=0;c2<CHN;c2++){
+    i0=Math.round(c2*per); i1=Math.round((c2+1)*per);
+    zm=(az[(i0+i1)>>1]+bz[(i0+i1)>>1])*0.5;
+    da=0.12+0.88*Math.pow(zm*0.5+0.5,1.35);
+
+    g.fillStyle='rgba(255,'+gF+','+bF+','+(fillA*da).toFixed(4)+')';
+    g.beginPath(); g.moveTo(ax[i0],ay[i0]);
+    for(j=i0+1;j<=i1;j++) g.lineTo(ax[j],ay[j]);
+    for(j=i1;j>=i0;j--) g.lineTo(bx[j],by[j]);
+    g.closePath(); g.fill();
+
+    g.strokeStyle='rgba(255,'+gE+','+bE+','+(edgeA*da).toFixed(4)+')';
+    g.lineWidth=(0.75+0.65*(zm*0.5+0.5))*UNIT;
+    g.beginPath(); g.moveTo(ax[i0],ay[i0]);
+    for(j=i0+1;j<=i1;j++) g.lineTo(ax[j],ay[j]);
+    g.stroke();
+    g.beginPath(); g.moveTo(bx[i0],by[i0]);
+    for(j=i0+1;j<=i1;j++) g.lineTo(bx[j],by[j]);
+    g.stroke();
+
+    g.strokeStyle='rgba(255,'+gE+','+bE+','+(edgeA*0.34*da).toFixed(4)+')';
+    g.lineWidth=0.6*UNIT;
+    g.beginPath(); g.moveTo(mx[i0],my[i0]);
+    for(j=i0+1;j<=i1;j++) g.lineTo(mx[j],my[j]);
+    g.stroke();
+    g.beginPath(); g.moveTo(nx2[i0],ny2[i0]);
+    for(j=i0+1;j<=i1;j++) g.lineTo(nx2[j],ny2[j]);
+    g.stroke();
+
+    /* λευκός πυρήνας μόνο στις μπροστινές ακμές → κοφτερή φωτεινή ίνα */
+    if(zm>0.05){
+      var hot=(zm-0.05)/0.95;
+      g.strokeStyle='rgba(255,'+(196+50*lv)+','+(140+90*lv)+','+(edgeA*0.62*hot).toFixed(4)+')';
+      g.lineWidth=0.55*UNIT;
+      g.beginPath(); g.moveTo(ax[i0],ay[i0]);
+      for(j=i0+1;j<=i1;j++) g.lineTo(ax[j],ay[j]);
+      g.stroke();
+      g.beginPath(); g.moveTo(bx[i0],by[i0]);
+      for(j=i0+1;j<=i1;j++) g.lineTo(bx[j],by[j]);
+      g.stroke();
+    }
+  }
+}
+
+/* ---------- λάμψη σημείου (αστέρι) ---------- */
+function flare(g,x,y,r,a){
+  if(a<=0.004||r<=0) return;
+  var gr=g.createRadialGradient(x,y,0,x,y,r);
+  gr.addColorStop(0,   'rgba(255,244,220,'+(a).toFixed(3)+')');
+  gr.addColorStop(0.22,'rgba(255,178,84,'+(a*0.42).toFixed(3)+')');
+  gr.addColorStop(1,   'rgba(255,120,20,0)');
+  g.fillStyle=gr; g.beginPath(); g.arc(x,y,r,0,TAU); g.fill();
+  var lg=g.createLinearGradient(x-r*3.4,y,x+r*3.4,y);
+  lg.addColorStop(0,'rgba(255,150,40,0)');
+  lg.addColorStop(0.5,'rgba(255,230,180,'+(a*0.55).toFixed(3)+')');
+  lg.addColorStop(1,'rgba(255,150,40,0)');
+  g.fillStyle=lg; g.fillRect(x-r*3.4, y-r*0.045, r*6.8, r*0.09);
+  var lv2=g.createLinearGradient(x,y-r*2.3,x,y+r*2.3);
+  lv2.addColorStop(0,'rgba(255,150,40,0)');
+  lv2.addColorStop(0.5,'rgba(255,230,180,'+(a*0.45).toFixed(3)+')');
+  lv2.addColorStop(1,'rgba(255,150,40,0)');
+  g.fillStyle=lv2; g.fillRect(x-r*0.045, y-r*2.3, r*0.09, r*4.6);
+}
+
+/* ---------- ένα καρέ ---------- */
+var yaw=0, roll=0, tGlob=0;
+function drawScene(t,dt,lv,br){
+  var g=sctx, Q=TIER[tier];
+  var sizeK=parseFloat($('sSize').value), glowK=parseFloat($('sGlow').value),
+      motion=parseFloat($('sMot').value)*(reduce?0.55:1);
+
+  g.globalCompositeOperation='source-over';
+  g.fillStyle='#000'; g.fillRect(0,0,CW,CH);
+  g.globalCompositeOperation='lighter';
+  g.lineCap='round'; g.lineJoin='round';
+
+  /* αιώρηση: αργή μετατόπιση + «ανάσα» + ελαφριά αλλαγή απόστασης */
+  var fl = reduce?0.35:1;
+  var cx = CW*0.5 + (Math.sin(t*0.23)*0.018 + Math.sin(t*0.11+1.3)*0.011)*CW*fl;
+  var cy = CH*0.5 + (Math.cos(t*0.19+0.7)*0.022 + Math.sin(t*0.13)*0.010)*CH*fl;
+  var breath = 1 + 0.026*Math.sin(t*0.75) + 0.016*Math.sin(t*0.31+2.0);
+  var driftZ = 1 + 0.038*Math.sin(t*0.16+2.1)*fl;
+
+  /* ακούει → μαζεύεται ελαφρά· μιλάει → ανοίγει με κάθε συλλαβή */
+  var R = Math.min(CW,CH)*0.275*sizeK*breath*driftZ
+        * (1 - 0.075*mixListen)
+        * (1 + 0.15*lv + 0.09*br);
+
+  var spin = (0.055 + 0.30*lv + 0.10*mixSpeak) * motion;
+  yaw  += dt*spin;
+  roll += dt*spin*0.34;
+  var pitch = 0.20*Math.sin(t*0.21)*fl + 0.10*Math.sin(t*0.07+1.1);
+  var MG = mul(mul(rotY(yaw), rotX(pitch)), rotZ(roll));
+
+  var bright = (0.95 + 1.00*lv + 0.28*mixListen + 0.35*br) * glowK;
+
+  var n=Q.sheets, i, o, f, M;
+  for(i=0;i<n;i++){
+    f=SHEET[i];
+    if(!f.fixPh) f.ph += dt*f.drift*(0.55+2.0*lv)*motion;
+    f.ph2 += dt*f.drift*(f.fixPh?1:0.62)*(0.55+1.6*lv)*motion;
+    M = mul(MG, f.M0);
+    var cop = f.cop + (mixListen>0.5?0:0);
+    for(o=0;o<cop;o++){
+      /* στο «ακούει» τα φύλλα μαζεύονται και συμπίπτουν → πιο εστιασμένο */
+      var offs = (cop===1?0:(o?1:-1)) * (1-0.55*mixListen);
+      sheet(g,M,f,offs,Q.P,Q.chunks,R,cx,cy,t,lv,br,bright,motion);
+    }
+    if(i<3){
+      var ps=[1,-1], q;
+      for(q=0;q<2;q++){
+        var zz=ps[q];
+        var X=M[2]*zz, Y=M[5]*zz, Z=M[8]*zz;
+        var pr=3.15/(3.15-Z);
+        var al=(0.05+0.32*lv+0.08*mixListen)*(0.35+0.65*(Z*0.5+0.5))*glowK;
+        flare(g, cx+X*R*pr, cy+Y*R*pr, R*(0.07+0.06*lv), al*0.8);
+      }
+    }
+  }
+
+  /* θερμός πυρήνας + άλως */
+  var core=g.createRadialGradient(cx,cy,0,cx,cy,R*1.05);
+  core.addColorStop(0,   'rgba(255,200,128,'+((0.05+0.30*lv+0.05*mixListen)*glowK).toFixed(3)+')');
+  core.addColorStop(0.55,'rgba(255,132,32,'+((0.02+0.14*lv)*glowK).toFixed(3)+')');
+  core.addColorStop(1,   'rgba(255,110,20,0)');
+  g.fillStyle=core; g.beginPath(); g.arc(cx,cy,R*1.05,0,TAU); g.fill();
+
+  var hr=R*(1.9+0.9*lv);
+  var halo=g.createRadialGradient(cx,cy,R*0.9,cx,cy,hr);
+  halo.addColorStop(0,'rgba(255,140,42,'+((0.05+0.10*lv)*glowK).toFixed(3)+')');
+  halo.addColorStop(1,'rgba(255,110,20,0)');
+  g.fillStyle=halo; g.beginPath(); g.arc(cx,cy,hr,0,TAU); g.fill();
+}
+
+function composite(lv){
+  var glowK=parseFloat($('sGlow').value);
+  BC[0].drawImage(scene, 0,0, BL[0].width, BL[0].height);
+  BC[1].drawImage(BL[0], 0,0, BL[1].width, BL[1].height);
+  BC[2].drawImage(BL[1], 0,0, BL[2].width, BL[2].height);
+  ctx.globalCompositeOperation='source-over';
+  ctx.globalAlpha=1; ctx.drawImage(scene,0,0,CW,CH);
+  ctx.globalCompositeOperation='lighter';
+  var k=(0.85+0.55*lv)*glowK;
+  ctx.globalAlpha=Math.min(1,0.50*k); ctx.drawImage(BL[0],0,0,CW,CH);
+  ctx.globalAlpha=Math.min(1,0.40*k); ctx.drawImage(BL[2],0,0,CW,CH);
+  ctx.globalAlpha=1;
+}
+
+/* ==================================================================
+   3. ΠΕΡΙΓΡΑΜΜΑ ΦΩΝΗΣ — συνθετικό, από το ίδιο το κείμενο.
+   Κάθε συλλαβή = ένα «χτύπημα» με γρήγορη άνοδο και ομαλή πτώση.
+   ================================================================== */
+var VOW='αάεέηήιίϊΐοόυύϋΰωώ', ACC='άέήίΐόύΰώ';
+function syl(w){
+  w=w.toLowerCase(); var out=[], i=0, j, acc;
+  while(i<w.length){
+    if(VOW.indexOf(w[i])>=0){
+      j=i; acc=false;
+      while(j<w.length && VOW.indexOf(w[j])>=0){ if(ACC.indexOf(w[j])>=0) acc=true; j++; }
+      out.push(acc); i=j;
+    } else i++;
+  }
+  if(!out.length) out.push(false);
+  return out;
+}
+var AMPS={low:0.42, mid:0.70, high:1.0, you:0.5};
+function buildEnv(text,power){
+  var amp=AMPS[power]||0.6, t=0.14, bumps=[], words=[], ci=0;
+  var parts=text.split(/\s+/).filter(Boolean);
+  parts.forEach(function(w){
+    var at=text.indexOf(w,ci); ci=at+w.length;
+    words.push({c:at, t:t});
+    var ss=syl(w.replace(/[^Ͱ-Ͽἀ-῿A-Za-z]/g,'')), k;
+    for(k=0;k<ss.length;k++){
+      var d=0.112+(ss[k]?0.052:0.016)+Math.random()*0.028;
+      bumps.push({t:t, d:d, a:(ss[k]?1:0.66)*(0.86+Math.random()*0.28)});
+      t+=d*0.93;
+    }
+    t+=0.045;
+    var last=w.charAt(w.length-1);
+    if(',·:'.indexOf(last)>=0) t+=0.20;
+    if('.!;?'.indexOf(last)>=0) t+=0.38;
+  });
+  return {dur:t+0.30, amp:amp, bumps:bumps, words:words};
+}
+function sampleEnv(e,tt){
+  var v=0, i, b, u, a;
+  for(i=0;i<e.bumps.length;i++){
+    b=e.bumps[i]; u=(tt-b.t)/b.d;
+    if(u<0||u>2.4) continue;
+    a = u<0.24 ? u/0.24 : Math.exp(-(u-0.24)*2.5);
+    a*=b.a; if(a>v) v=a;
+  }
+  return Math.min(1, v*e.amp);
+}
+
+/* ==================================================================
+   4. ΣΕΝΑΡΙΟ ΔΟΚΙΜΗΣ
+   ================================================================== */
+var SCRIPT=[
+  {who:'you',  text:'Αία, καλημέρα. Πόσο έχουμε ακόμα;'},
+  {who:'aias', text:'Καλημέρα. Σαράντα δύο χιλιόμετρα, περίπου τριάντα πέντε λεπτά.', p:'low'},
+  {who:'you',  text:'Βάλε κάτι να ακούσουμε και πες μου για την κίνηση.'},
+  {who:'aias', text:'Έβαλα τη λίστα σου. Στον Κηφισό έχει καθυστέρηση δώδεκα λεπτά, οπότε σε βγάζω από την Πειραιώς.', p:'mid'},
+  {who:'you',  text:'Αία, πρόσεχε! Τι έγινε;'},
+  {who:'aias', text:'Φρενάρω! Το όχημα μπροστά σταμάτησε απότομα. Κρατήσου, σε επαναφέρω στη λωρίδα.', p:'high'},
+  {who:'you',  text:'Εντάξει, ηρέμησε. Συνέχισε κανονικά.'},
+  {who:'aias', text:'Όλα καλά. Επιστρέφω σε ήρεμη οδήγηση.', p:'low'}
+];
+var LABEL={low:'ΧΑΜΗΛΗ ΕΝΤΑΣΗ', mid:'ΜΕΣΑΙΑ ΕΝΤΑΣΗ', high:'ΥΨΗΛΗ ΕΝΤΑΣΗ'};
+
+var runMode='auto';          /* 'auto' = σενάριο, αλλιώς χειροκίνητο */
+var turn=-1, turnT=0, playT=0, turnDur=0, env=null, gap=0, playing=false;
+var ttsBusy=false, ttsOn=true, elVoice=null;
+
+function pickVoice(){
+  if(!('speechSynthesis' in window)) return null;
+  var vs=speechSynthesis.getVoices()||[];
+  for(var i=0;i<vs.length;i++) if(/^el/i.test(vs[i].lang||'')) return vs[i];
+  return null;
+}
+if('speechSynthesis' in window){
+  elVoice=pickVoice();
+  speechSynthesis.onvoiceschanged=function(){ elVoice=pickVoice(); };
+}
+function speak(text){
+  if(!ttsOn || !('speechSynthesis' in window)) return false;
+  try{
+    speechSynthesis.cancel();
+    var u=new SpeechSynthesisUtterance(text);
+    u.lang='el-GR'; if(elVoice) u.voice=elVoice;
+    u.rate=1; u.pitch=0.92;
+    ttsBusy=true;
+    var started=false;
+    u.onstart=function(){ started=true; };
+    u.onend=function(){ ttsBusy=false; };
+    u.onerror=function(){ ttsBusy=false; };
+    /* αν δεν ξεκινήσει (καμία ελληνική φωνή, φραγμένος ήχος), μη μπλοκάρει το σενάριο */
+    setTimeout(function(){ if(!started) ttsBusy=false; }, 900);
+    u.onboundary=function(e){
+      if(!env || e.charIndex==null) return;
+      var w=env.words, best=null, i;
+      for(i=0;i<w.length;i++){ if(w[i].c<=e.charIndex) best=w[i]; else break; }
+      if(best && Math.abs(best.t-playT)>0.10) playT += (best.t-playT)*0.55;
+    };
+    speechSynthesis.speak(u);
+    return true;
+  }catch(err){ ttsBusy=false; return false; }
+}
+
+function showCap(who,text,tag,you){
+  $('who').innerHTML='<b>'+who+'</b>'+(tag?'<span class="tag">'+tag+'</span>':'');
+  $('line').textContent=text;
+  $('line').className = you?'you':'';
+}
+function playTurn(i){
+  if(i>=SCRIPT.length){ finish(); return; }
+  turn=i; turnT=0; playT=0;
+  var T=SCRIPT[i];
+  env=buildEnv(T.text, T.who==='you'?'you':T.p);
+  if(T.who==='you'){
+    mode='listen';
+    turnDur=Math.max(2.6, env.dur*1.05)+0.45;
+    showCap('ΕΣΥ', T.text, 'ΑΚΟΥΕΙ', true);
+    $('hint').textContent='πες το δυνατά · πάτα για συνέχεια';
+    $('bar').classList.add('on');
+  }else{
+    mode='speak';
+    turnDur=env.dur+0.40;
+    showCap('ΑΙΑΣ', T.text, LABEL[T.p], false);
+    $('hint').textContent='';
+    $('bar').classList.remove('on');
+    speak(T.text);
+  }
+}
+function finish(){
+  playing=false; mode='idle'; env=null;
+  showCap('ΑΙΑΣ','','ΣΙΩΠΗ',false);
+  $('hint').textContent='τέλος σεναρίου · ⚙ για επανάληψη ή χειροκίνητες καταστάσεις';
+  $('bar').classList.remove('on');
+}
+function startScript(){
+  runMode='auto'; playing=true; gap=0; markBtn('auto');
+  playTurn(0);
+}
+
+/* χειροκίνητη κατάσταση: ατέρμονη «ομιλία» για να δεις κάθε επίπεδο */
+var MANUAL='Ο Αίας παρακολουθεί τον δρόμο και σου μιλάει ήρεμα, με σταθερό ρυθμό, όσο οδηγείς.';
+function setManual(st){
+  runMode=st; playing=false; ttsBusy=false;
+  if('speechSynthesis' in window) speechSynthesis.cancel();
+  $('bar').classList.remove('on'); $('hint').textContent='χειροκίνητη κατάσταση';
+  if(st==='idle'){ mode='idle'; env=null; showCap('ΑΙΑΣ','','ΣΙΩΠΗ',false); }
+  else if(st==='listen'){ mode='listen'; env=null; showCap('ΑΙΑΣ','','ΑΚΟΥΕΙ',false); }
+  else{ mode='speak'; env=buildEnv(MANUAL,st); playT=0; showCap('ΑΙΑΣ','', LABEL[st], false); }
+  markBtn(st);
+}
+function markBtn(st){
+  [].forEach.call(document.querySelectorAll('.sb[data-st]'),function(b){
+    b.classList.toggle('act', b.getAttribute('data-st')===st);
+  });
+}
+
+/* ==================================================================
+   5. ΒΡΟΧΟΣ
+   ================================================================== */
+var last=0, acc=0, frames=0, tAcc=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  var dt=Math.min(0.05,(now-last)/1000)||0.016; last=now;
+  tGlob+=dt;
+
+  /* --- πηγή έντασης --- */
+  var target=0;
+  if(runMode==='auto' && playing){
+    turnT+=dt;
+    var T=SCRIPT[turn];
+    if(T && T.who==='aias'){
+      playT+=dt;
+      target=sampleEnv(env,playT);
+      if(turnT>turnDur && !ttsBusy){ if(gap<=0) gap=0.55; }
+      if(turnT>turnDur*1.8+2){ ttsBusy=false; if(gap<=0) gap=0.4; }
+    }else if(T){
+      target=0.055+0.045*Math.sin(tGlob*1.7);
+      $('bar').firstElementChild.style.width=Math.min(100,(turnT/turnDur)*100)+'%';
+      if(turnT>turnDur && gap<=0) gap=0.35;
+    }
+    if(gap>0){ gap-=dt; if(gap<=0){ gap=0; playTurn(turn+1); } }
+  }else if(runMode==='listen'){
+    target=0.055+0.045*Math.sin(tGlob*1.7);
+  }else if(runMode==='idle'){
+    target=0.03+0.025*Math.sin(tGlob*0.9);
+  }else if(runMode==='ext'){
+    target=extLevel;
+  }else if(env){
+    playT+=dt; if(playT>env.dur) playT=0;
+    target=sampleEnv(env,playT);
+  }
+
+  /* γρήγορη άνοδος, ομαλή πτώση — έτσι «ανοίγει» σε κάθε συλλαβή */
+  levelT=target;
+  level += (target-level)*(target>level?0.42:0.10);
+  var d=target-level; if(d>0.18) burst=Math.min(1,burst+d*1.6);
+  burst *= Math.pow(0.06, dt);
+  mixListen += ((mode==='listen'?1:0)-mixListen)*Math.min(1,dt*3.2);
+  mixSpeak  += ((mode==='speak' ?1:0)-mixSpeak )*Math.min(1,dt*4.0);
+
+  drawScene(tGlob,dt,level,burst);
+  composite(level);
+
+  /* αυτόματη ποιότητα */
+  frames++; tAcc+=dt;
+  if(frames>=45){
+    var fps=frames/tAcc;
+    if(fps<44 && tier>0) tier--;
+    else if(fps>57 && tier<2) tier++;
+    frames=0; tAcc=0;
+  }
+}
+
+/* ==================================================================
+   6. ΧΕΙΡΙΣΤΗΡΙΑ
+   ================================================================== */
+$('gear').addEventListener('click',function(){ $('panel').classList.toggle('open'); });
+[].forEach.call(document.querySelectorAll('.sb[data-st]'),function(b){
+  b.addEventListener('click',function(){
+    var st=b.getAttribute('data-st');
+    if(st==='auto') startScript(); else setManual(st);
+    $('panel').classList.remove('open');
+  });
+});
+$('again').addEventListener('click',function(){ startScript(); $('panel').classList.remove('open'); });
+$('go').addEventListener('click',function(){
+  $('ov').classList.add('hidden');
+  if('speechSynthesis' in window){ try{ speechSynthesis.cancel(); }catch(e){} }
+  setTimeout(startScript, 380);
+});
+$('tTts').addEventListener('change',function(){
+  ttsOn=this.checked;
+  if(!ttsOn && 'speechSynthesis' in window){ speechSynthesis.cancel(); ttsBusy=false; }
+});
+$('tCap').addEventListener('change',function(){ $('cap').classList.toggle('off',!this.checked); });
+cv.addEventListener('pointerdown',function(){
+  if($('panel').classList.contains('open')){ $('panel').classList.remove('open'); return; }
+  if(runMode==='auto' && playing && SCRIPT[turn] && SCRIPT[turn].who==='you' && gap<=0) gap=0.05;
+});
+
+var hideT=null;
+function poke(){
+  $('gear').classList.remove('faded'); clearTimeout(hideT);
+  hideT=setTimeout(function(){ if(!$('panel').classList.contains('open')) $('gear').classList.add('faded'); },4500);
+}
+['pointerdown','pointermove','keydown'].forEach(function(e){ document.addEventListener(e,poke,{passive:true}); });
+
+/* ---------- εκκίνηση ---------- */
+resize();
+requestAnimationFrame(function(t){ last=t; loop(t); });
+showCap('ΑΙΑΣ','','ΣΙΩΠΗ',false);
+markBtn('idle');
+poke();
+
+/* γέφυρα για τη φάση 2 (μικρόφωνο / ElevenLabs):
+   AIAS.level(0..1) και AIAS.mode('idle'|'listen'|'speak') */
+window.AIAS={
+  set level(v){ runMode='ext'; env=null; extLevel=Math.max(0,Math.min(1,v)); },
+  set mode(m){ mode=m; },
+  script:startScript, manual:setManual
+};
+})();
+</script>
+</body>
+</html>
