@@ -93,6 +93,7 @@
   }
   .sb.act{background:rgba(255,140,40,.18);color:#ffd9a8;border-color:rgba(255,150,50,.6)}
   #panel label{font-size:11px;color:#8d7860;display:flex;flex-direction:column;gap:5px}
+  #panel label span{color:#c8a074;font-variant-numeric:tabular-nums}
   #panel input[type=range]{width:100%;accent-color:var(--amber)}
   .tog{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#a89684}
   .tog input{width:18px;height:18px;accent-color:var(--amber)}
@@ -135,6 +136,12 @@
     <button class="sb" data-st="mid">Μιλάει · μεσαία</button>
     <button class="sb" data-st="high">Μιλάει · υψηλά</button>
   </div>
+
+  <h3>Κορδέλες</h3>
+  <label>Πόσες <span id="vRibs">3</span>
+    <input type="range" id="sRibs" min="2" max="7" step="1" value="3"></label>
+  <label>Πλάτος <span id="vWide">1.80×</span>
+    <input type="range" id="sWide" min="0.3" max="2.4" step="0.05" value="1.8"></label>
 
   <h3>Εμφάνιση</h3>
   <label>Μέγεθος <input type="range" id="sSize" min="0.6" max="1.5" step="0.02" value="1"></label>
@@ -191,39 +198,67 @@ function mul(a,b){
   return o;
 }
 
-var MAXP=128, MAXS=20;
-function makeRib(){
-  var h=[],k,amp;
-  for(k=1;k<=3;k++){
-    amp=1/Math.pow(k,2.15);
+var MAXP=96, MAXS=48;
+
+/* περιστροφή γύρω από αυθαίρετο άξονα (Rodrigues) */
+function axisRot(ax,ay,az,an){
+  var c=Math.cos(an), si=Math.sin(an), tt=1-c;
+  return [tt*ax*ax+c,    tt*ax*ay-si*az, tt*ax*az+si*ay,
+          tt*ax*ay+si*az, tt*ay*ay+c,    tt*ay*az-si*ax,
+          tt*ax*az-si*ay, tt*ay*az+si*ax, tt*az*az+c];
+}
+
+/*  Η ράχη κάθε κορδέλας είναι κύκλος σε δικό της επίπεδο — έτσι το
+    σύνολο διαβάζεται σαν σφαίρα. Τα επίπεδα μοιράζονται ομοιόμορφα με
+    τη χρυσή γωνία, ώστε καμία κατεύθυνση να μην περισσεύει. Οι δύο
+    επόμενες αρμονικές είναι μικρές: δίνουν κύμανση, όχι κουβάρι.     */
+var NRIB=7;
+function makeRib(idx){
+  var z=1-2*(idx+0.5)/NRIB, r=Math.sqrt(Math.max(0,1-z*z)), th=idx*2.39996;
+  var nx=r*Math.cos(th), ny=r*Math.sin(th), nz=z;
+  /* δύο κάθετα διανύσματα στο επίπεδο του κύκλου */
+  var hx=(Math.abs(nz)<0.9)?0:1, hy=0, hz=(Math.abs(nz)<0.9)?1:0;
+  var ux=ny*hz-nz*hy, uy=nz*hx-nx*hz, uz=nx*hy-ny*hx;
+  var ul=Math.sqrt(ux*ux+uy*uy+uz*uz)||1; ux/=ul; uy/=ul; uz/=ul;
+  var vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
+
+  var h=[{k:1, ax:ux, ay:uy, az:uz, bx:vx, by:vy, bz:vz, ph:rnd()*TAU, w:0.10+rnd()*0.10}];
+  for(var k=2;k<=3;k++){
+    var amp=0.42/Math.pow(k,1.9);
     h.push({k:k,
       ax:(rnd()*2-1)*amp, ay:(rnd()*2-1)*amp, az:(rnd()*2-1)*amp,
       bx:(rnd()*2-1)*amp, by:(rnd()*2-1)*amp, bz:(rnd()*2-1)*amp,
-      ph:rnd()*TAU,
-      w:(rnd()*2-1)*(k===1?0.085:0.30/k)});          /* πόσο γρήγορα μεταμορφώνεται */
+      ph:rnd()*TAU, w:(rnd()*2-1)*0.22});
   }
+  /* αργή, δική της μετάπτωση του επιπέδου — όχι κοινή περιστροφή */
+  var px=rnd()*2-1, py=rnd()*2-1, pz=rnd()*2-1;
+  var pl=Math.sqrt(px*px+py*py+pz*pz)||1;
   return {
     h:h,
-    hw : 0.17+rnd()*0.14,              /* μισό πλάτος — χοντρή κορδέλα   */
-    hwm: 1+Math.floor(rnd()*3),
+    axx:px/pl, axy:py/pl, axz:pz/pl, spd:(rnd()*2-1)*0.075,
+    hw : 0.50+rnd()*0.26,
+    hwm: 1+Math.floor(rnd()*2),
     hwp: rnd()*TAU,
-    tw : 0.35+rnd()*1.05,                /* συστροφές σε έναν γύρο         */
-    tws:(rnd()*2-1)*0.30,
+    tw : 0.35+rnd()*0.65,
+    tws:(rnd()*2-1)*0.22,
     twp: rnd()*TAU,
-    rip: 0.05+rnd()*0.055,             /* βάθος τσακίσματος              */
-    ripk: 2+Math.floor(rnd()*4),       /* πόσες τσακίσεις                */
-    ripw: 0.7+rnd()*1.5,               /* ταχύτητα του κύματος           */
+    rip: 0.030+rnd()*0.030,
+    ripk: 2+Math.floor(rnd()*3),
+    ripw: 0.7+rnd()*1.3,
     ripp: rnd()*TAU,
+    fold: 0.055+rnd()*0.050,
+    foldk: 1+Math.floor(rnd()*2),
+    foldp: rnd()*TAU,
     seed: rnd()*10
   };
 }
-var RIB=[]; for(var ri=0;ri<12;ri++) RIB.push(makeRib());
+var RIB=[]; for(var ri=0;ri<NRIB;ri++) RIB.push(makeRib(ri));
 
 /* ---------- ποιότητα ---------- */
 var TIER=[
-  {ribs:6, P: 72, CH:5, S:13},
-  {ribs:8, P: 92, CH:6, S:17},
-  {ribs:10,P:108, CH:7, S:19}
+  {ribs:3, P:56, CH:5, S:26},
+  {ribs:3, P:68, CH:6, S:36},
+  {ribs:4, P:80, CH:7, S:44}
 ];
 var tier = (matchMedia('(pointer:coarse)').matches ? 1 : 2);
 
@@ -260,7 +295,7 @@ addEventListener('resize',resize);
 addEventListener('orientationchange',function(){ setTimeout(resize,150); });
 
 /* ---------- μία κορδέλα ---------- */
-var BANDS=5, PATHS=null;
+var BANDS=5, PATHS=null, WIDE=1;
 function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
   var i,j,k,hh,ang,ca,sa,du=TAU/P, maxR=1e-6;
 
@@ -279,7 +314,7 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
   }
   /* σταθερό μέγεθος, και τράβηγμα προς το κέλυφος ώστε οι κορδέλες
      να αγκαλιάζουν τη σφαίρα αντί να μπερδεύονται στο κέντρο */
-  var sc=0.82/Math.sqrt(maxR), SPH=0.78, RAD=0.86;
+  var sc=0.76/Math.sqrt(maxR), SPH=0.45, RAD=0.76;
   for(i=0;i<P;i++){
     var q3=i*3;
     var X2=HC[q3]*sc, Y2=HC[q3+1]*sc, Z2=HC[q3+2]*sc;
@@ -288,8 +323,9 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     HC[q3]=X2*kk; HC[q3+1]=Y2*kk; HC[q3+2]=Z2*kk;
   }
 
-  var hwK=f.hw*(1+0.30*lv+0.25*br)*(1-0.26*calm);
+  var hwK=f.hw*WIDE*(1+0.30*lv+0.25*br)*(1-0.26*calm);
   var ripK=f.rip*(1+2.0*lv+1.3*br)*(1-0.45*calm);
+  var foldK=f.fold*(1+1.5*lv+1.0*br)*(1-0.35*calm);
   var SOFT=0.82, SHELL=1.02+0.10*lv+0.05*br;
 
   for(i=0;i<=P;i++){
@@ -311,12 +347,15 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     var Wx=cw2*e1x+sw2*e2x, Wy=cw2*e1y+sw2*e2y, Wz=cw2*e1z+sw2*e2z;
     var Nx=cw2*e2x-sw2*e1x, Ny=cw2*e2y-sw2*e1y, Nz=cw2*e2z-sw2*e1z;
 
-    var hw=hwK*(0.58+0.42*Math.sin(f.hwm*u2+f.hwp));
+    /* στενεύει και ανοίγει κατά μήκος, όπως κορδέλα που πετάει */
+    var hwq=0.5+0.5*Math.sin(f.hwm*u2+f.hwp);
+    var hw=hwK*(0.30+0.70*Math.pow(hwq,0.65));
 
     for(j=0;j<=S;j++){
       var w=(j/S)*2-1;
       w=(w<0?-1:1)*Math.pow(Math.abs(w),0.72);
-      var rip=ripK*Math.sin(f.ripk*u2 - t*f.ripw*(0.6+1.3*lv)*motion + 0.7*w + f.ripp);
+      var rip=ripK*Math.sin(f.ripk*u2 - t*f.ripw*(0.6+1.3*lv)*motion + 0.7*w + f.ripp)
+             +foldK*Math.sin(f.foldk*Math.PI*w + f.foldp + 0.6*u2 - t*0.55*motion);
       var px=Cx+w*hw*Wx+rip*Nx, py=Cy+w*hw*Wy+rip*Ny, pz=Cz+w*hw*Wz+rip*Nz;
 
       var L=Math.sqrt(px*px+py*py+pz*pz);
@@ -361,7 +400,7 @@ function strokeBundles(g,lv,bright,lw){
     edge=(gi===1);
     for(bi=0;bi<BANDS;bi++){
       dep=0.22+0.78*((bi+0.5)/BANDS);
-      al=(edge?0.215:0.088)*dep*bright;
+      al=(edge?0.260:0.068)*dep*bright;
       if(al<0.003) continue;
       if(al>0.5) al=0.5;
       gg=(108+38*lv+(edge?34:0))|0; bb=(16+40*lv+(edge?22:0))|0;
@@ -399,11 +438,16 @@ function drawScene(t,dt,lv,br){
   var pitch=0.11*Math.sin(t*0.13)*fl;
   var MG = mul(mul(rotY(yaw), rotX(pitch)), rotZ(roll));
 
+  WIDE=parseFloat($('sWide').value);
   var bright=(1.00+0.52*lv+0.22*mixListen+0.35*br)*glowK;
 
   PATHS=[]; for(var pi=0;pi<BANDS*2;pi++) PATHS.push(new Path2D());
-  for(var i=0;i<Q.ribs;i++)
-    ribbon(MG,RIB[i],Q.P,Q.CH,Q.S,R,cx,cy,t,lv,br,motion,mixListen);
+  var nrib=Math.min(NRIB, parseInt($('sRibs').value,10)||3);
+  for(var i=0;i<nrib;i++){
+    var f=RIB[i];
+    var Mi=mul(MG, axisRot(f.axx,f.axy,f.axz, t*f.spd*motion));
+    ribbon(Mi,f,Q.P,Q.CH,Q.S,R,cx,cy,t,lv,br,motion,mixListen);
+  }
 
   /* 1. ορατός καμβάς */
   ctx.setTransform(1,0,0,1,0,0);
@@ -691,6 +735,21 @@ $('tTts').addEventListener('change',function(){
   if(!ttsOn && 'speechSynthesis' in window){ speechSynthesis.cancel(); ttsBusy=false; }
 });
 $('tCap').addEventListener('change',function(){ $('cap').classList.toggle('off',!this.checked); });
+
+/* οι δύο επιλογές που καθορίζουν το ύφος: πόσες κορδέλες και πόσο φαρδιές */
+function showRib(){
+  $('vRibs').textContent=$('sRibs').value;
+  $('vWide').textContent=parseFloat($('sWide').value).toFixed(2)+'×';
+}
+[['sRibs','aias.ribs'],['sWide','aias.wide'],['sSize','aias.size'],
+ ['sGlow','aias.glow'],['sMot','aias.mot']].forEach(function(pr){
+  var el=$(pr[0]);
+  try{ var v=localStorage.getItem(pr[1]); if(v!==null) el.value=v; }catch(e){}
+  el.addEventListener('input',function(){
+    showRib(); try{ localStorage.setItem(pr[1],el.value); }catch(e){}
+  });
+});
+showRib();
 cv.addEventListener('pointerdown',function(){
   if($('panel').classList.contains('open')){ $('panel').classList.remove('open'); return; }
   if(runMode==='auto' && playing && SCRIPT[turn] && SCRIPT[turn].who==='you' && gap<=0) gap=0.05;
