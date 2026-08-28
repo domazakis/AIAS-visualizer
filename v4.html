@@ -231,13 +231,13 @@ function makeRib(idx){
   var ul=Math.sqrt(ux*ux+uy*uy+uz*uz)||1; ux/=ul; uy/=ul; uz/=ul;
   var vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
 
-  var h=[{k:1, ax:ux, ay:uy, az:uz, bx:vx, by:vy, bz:vz, ph:rnd()*TAU, w:0.030+rnd()*0.032, acc:0}];
+  var h=[{k:1, ax:ux, ay:uy, az:uz, bx:vx, by:vy, bz:vz, ph:rnd()*TAU, w:0.125+rnd()*0.105, acc:0}];
   for(var k=2;k<=3;k++){
     var amp=0.42/Math.pow(k,1.9);
     h.push({k:k,
       ax:(rnd()*2-1)*amp, ay:(rnd()*2-1)*amp, az:(rnd()*2-1)*amp,
       bx:(rnd()*2-1)*amp, by:(rnd()*2-1)*amp, bz:(rnd()*2-1)*amp,
-      ph:rnd()*TAU, w:(rnd()*2-1)*0.068, acc:0});
+      ph:rnd()*TAU, w:(rnd()*2-1)*0.150, acc:0});
   }
   /* αργή, δική της μετάπτωση του επιπέδου — όχι κοινή περιστροφή */
   var px=rnd()*2-1, py=rnd()*2-1, pz=rnd()*2-1;
@@ -250,17 +250,18 @@ function makeRib(idx){
     hwm: 1+Math.floor(rnd()*2),
     hwp: rnd()*TAU,
     tw : 0.35+rnd()*0.65,
-    tws:(rnd()*2-1)*0.068,
+    tws:(rnd()*2-1)*0.110,
     twp: rnd()*TAU,
     rip: 0.030+rnd()*0.030,
     ripk: 2+Math.floor(rnd()*3),
-    ripw: 0.24+rnd()*0.40,
+    ripw: 0.68+rnd()*0.80,
     ripp: rnd()*TAU,
     fold: 0.055+rnd()*0.050,
     foldk: 1+Math.floor(rnd()*2),
     foldp: rnd()*TAU,
     seed: rnd()*10,
-    accTw:0, accRip:0, accFold:0, accAx:0
+    accTw:0, accRip:0, accFold:0, accAx:0,
+    flow: 0.34+rnd()*0.26, accFlow:0
   };
 }
 var RIB=[]; for(var ri=0;ri<NRIB;ri++) RIB.push(makeRib(ri));
@@ -360,13 +361,13 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     e1x/=el; e1y/=el; e1z/=el;
     var e2x=Ty*e1z-Tz*e1y, e2y=Tz*e1x-Tx*e1z, e2z=Tx*e1y-Ty*e1x;
 
-    var psi=f.tw*u2 + f.twp + f.accTw;
+    var psi=f.tw*(u2+f.accFlow) + f.twp + f.accTw;
     var cw2=Math.cos(psi), sw2=Math.sin(psi);
     var Wx=cw2*e1x+sw2*e2x, Wy=cw2*e1y+sw2*e2y, Wz=cw2*e1z+sw2*e2z;
     var Nx=cw2*e2x-sw2*e1x, Ny=cw2*e2y-sw2*e1y, Nz=cw2*e2z-sw2*e1z;
 
     /* στενεύει και ανοίγει κατά μήκος, όπως κορδέλα που πετάει */
-    var hwq=0.5+0.5*Math.sin(f.hwm*u2+f.hwp);
+    var hwq=0.5+0.5*Math.sin(f.hwm*(u2+f.accFlow)+f.hwp);
     var hw=hwK*(0.30+0.70*Math.pow(hwq,0.65));
 
     for(j=0;j<=S;j++){
@@ -457,6 +458,7 @@ function drawScene(t,dt,lv,br){
   var MG = mul(mul(rotY(yaw), rotX(pitch)), rotZ(roll));
 
   WIDE=parseFloat($('sWide').value); setSoft();
+  var flowK=(1.0+1.70*lv+2.20*glowEnv)*motion;
   var bright=(0.76+0.20*lv+0.34*glowEnv+0.15*mixListen+0.14*br)*glowK;
 
   PATHS=[]; for(var pi=0;pi<BANDS*2;pi++) PATHS.push(new Path2D());
@@ -467,11 +469,18 @@ function drawScene(t,dt,lv,br){
        χρόνος επί συχνότητα, τότε κάθε αλλαγή έντασης —που αλλάζει τη
        συχνότητα— θα μετατόπιζε ακαριαία ολόκληρο το κύμα: οι κορδέλες
        θα ξεκινούσαν να κουνιούνται από άλλο σημείο σε κάθε συλλαβή. */
-    for(var hk=0;hk<3;hk++) f.h[hk].acc=wrap(f.h[hk].acc + dt*f.h[hk].w*motion);
-    f.accTw  = wrap(f.accTw  + dt*f.tws*motion);
-    f.accRip = wrap(f.accRip + dt*f.ripw*(0.82+0.38*lv)*motion);
-    f.accFold= wrap(f.accFold+ dt*0.21*motion);
+    /* Ένα ρεύμα διαπερνά τα πάντα. Στη σιωπή τρέχει ήρεμα· στην ομιλία
+       τριπλασιάζεται. Το γρήγορο μέρος έρχεται από τη στιγμιαία ένταση
+       και το ομαλό από τον φάκελο φωτός, ώστε να επιταχύνει αισθητά
+       χωρίς να τινάζεται σε κάθε συλλαβή. */
+    for(var hk=0;hk<3;hk++) f.h[hk].acc=wrap(f.h[hk].acc + dt*f.h[hk].w*flowK);
+    f.accTw  = wrap(f.accTw  + dt*f.tws*flowK);
+    f.accRip = wrap(f.accRip + dt*f.ripw*flowK);
+    f.accFold= wrap(f.accFold+ dt*0.45*flowK);
     f.accAx  = wrap(f.accAx  + dt*f.spd*motion);
+    /* δεν τυλίγεται: πολλαπλασιάζεται με μη ακέραιους, το τύλιγμα θα
+       δημιουργούσε ακριβώς το πήδημα που μόλις διορθώσαμε */
+    f.accFlow += dt*f.flow*flowK;
     var Mi=mul(MG, axisRot(f.axx,f.axy,f.axz, f.accAx));
     ribbon(Mi,f,Q.P,Q.CH,Q.S,R,cx,cy,t,lv,br,motion,mixListen);
   }
