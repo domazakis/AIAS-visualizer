@@ -145,6 +145,9 @@
   <label>Πλάτος <span id="vWide">1.10×</span>
     <input type="range" id="sWide" min="0.3" max="2.4" step="0.05" value="1.1"></label>
 
+  <label>Σχήμα φλόγας <span id="vFlame">0.50</span>
+    <input type="range" id="sFlame" min="0" max="1" step="0.05" value="0.5"></label>
+
   <label>Απαλότητα <span id="vSoft">0.70</span>
     <input type="range" id="sSoft" min="0" max="1" step="0.05" value="0.7"></label>
 
@@ -222,8 +225,12 @@ function axisRot(ax,ay,az,an){
     τη χρυσή γωνία, ώστε καμία κατεύθυνση να μην περισσεύει. Οι δύο
     επόμενες αρμονικές είναι μικρές: δίνουν κύμανση, όχι κουβάρι.     */
 var NRIB=7;
+/* Ακολουθία van der Corput: κάθε αρχικό κομμάτι της είναι απλωμένο.
+   Με απλή σπείρα Fibonacci για επτά, οι πέντε πρώτες μαζεύονταν σε μια
+   ζώνη και η σφαίρα έβγαινε λοξά οβάλ. */
+function vdc(n){ var r=0,d=0.5; while(n>0){ r+=(n&1)*d; n>>=1; d*=0.5; } return r; }
 function makeRib(idx){
-  var z=1-2*(idx+0.5)/NRIB, r=Math.sqrt(Math.max(0,1-z*z)), th=idx*2.39996;
+  var z=2*vdc(idx+1)-1, r=Math.sqrt(Math.max(0,1-z*z)), th=idx*2.39996;
   var nx=r*Math.cos(th), ny=r*Math.sin(th), nz=z;
   /* δύο κάθετα διανύσματα στο επίπεδο του κύκλου */
   var hx=(Math.abs(nz)<0.9)?0:1, hy=0, hz=(Math.abs(nz)<0.9)?1:0;
@@ -245,7 +252,7 @@ function makeRib(idx){
   return {
     h:h,
     axx:px/pl, axy:py/pl, axz:pz/pl, spd:(rnd()*2-1)*0.027,
-    ofx:(rnd()*2-1)*0.035, ofy:(rnd()*2-1)*0.035, ofz:(rnd()*2-1)*0.035,
+    ofx:(rnd()*2-1)*0.020, ofy:(rnd()*2-1)*0.020, ofz:(rnd()*2-1)*0.020,
     hw : 0.50+rnd()*0.26,
     hwm: 1+Math.floor(rnd()*2),
     hwp: rnd()*TAU,
@@ -310,7 +317,7 @@ addEventListener('resize',resize);
 addEventListener('orientationchange',function(){ setTimeout(resize,150); });
 
 /* ---------- μία κορδέλα ---------- */
-var BANDS=5, PATHS=null, WIDE=1;
+var BANDS=5, PATHS=null, WIDE=1, FLAME=0, SWAY=0;
 function wrap(a){ return a>=TAU?a-TAU:(a<0?a+TAU:a); }
 var TRAILFADE=0.42, TRAILK=TRAILFADE;   /* ισοσταθμιστής ουράς: μόνιμη κατάσταση = A/f */
 function setSoft(){ var v=parseFloat($('sSoft').value);
@@ -385,6 +392,19 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
       var vx=M[0]*px+M[1]*py+M[2]*pz,
           vy=M[3]*px+M[4]*py+M[5]*pz,
           vz=M[6]*px+M[7]*py+M[8]*pz;
+      /* Η φλόγα εφαρμόζεται μετά την περιστροφή, στον χώρο της οθόνης:
+         έτσι δείχνει πάντα προς τα πάνω όσο κι αν γυρίζει η σφαίρα.
+         Στενεύει και τεντώνεται στην κορυφή, φαρδαίνει ελαφρά στη βάση,
+         και η μύτη λικνίζεται αργά όπως η πραγματική φλόγα. */
+      if(FLAME>0){
+        var uu=0.5*(1-vy); if(uu<0)uu=0; else if(uu>1)uu=1;
+        var tp=uu*uu*Math.sqrt(uu);          /* στενεύει απότομα προς τη μύτη */
+        var kx=1-FLAME*1.15*tp+FLAME*0.12*(1-uu);
+        if(kx<0.10) kx=0.10;
+        vx=vx*kx+FLAME*SWAY*tp;
+        vz*=kx;
+        vy-=FLAME*0.34*tp;
+      }
       var id=i*(S+1)+j;
       VX[id]=vx; VY[id]=vy; VZ[id]=vz;
       var pr=3.3/(3.3-vz);
@@ -458,6 +478,8 @@ function drawScene(t,dt,lv,br){
   var MG = mul(mul(rotY(yaw), rotX(pitch)), rotZ(roll));
 
   WIDE=parseFloat($('sWide').value); setSoft();
+  FLAME=parseFloat($('sFlame').value);
+  SWAY=(0.10+0.10*lv)*(Math.sin(t*0.37)*0.6+Math.sin(t*0.23+1.7)*0.4);
   var flowK=(1.0+1.70*lv+2.20*glowEnv)*motion;
   var bright=(0.76+0.20*lv+0.34*glowEnv+0.15*mixListen+0.14*br)*glowK;
 
@@ -506,11 +528,12 @@ function drawScene(t,dt,lv,br){
   g2.setTransform(BK,0,0,BK,0,0);
   strokeBundles(g2,lv,bright*TRAILK,1/BK);
 
-  var core=g2.createRadialGradient(cx,cy,0,cx,cy,R*1.05);
+  var ccy=cy+FLAME*R*0.16;
+  var core=g2.createRadialGradient(cx,ccy,0,cx,ccy,R*1.05);
   core.addColorStop(0,   'rgba(255,204,140,'+((0.009+0.105*glowEnv+0.018*mixListen)*glowK).toFixed(3)+')');
   core.addColorStop(0.55,'rgba(255,144,46,'+((0.004+0.055*glowEnv)*glowK).toFixed(3)+')');
   core.addColorStop(1,   'rgba(255,110,20,0)');
-  g2.fillStyle=core; g2.beginPath(); g2.arc(cx,cy,R*1.05,0,TAU); g2.fill();
+  g2.fillStyle=core; g2.beginPath(); g2.arc(cx,ccy,R*1.05,0,TAU); g2.fill();
 
   var hr=R*(2.05+0.60*glowEnv);
   var halo=g2.createRadialGradient(cx,cy,R*0.9,cx,cy,hr);
@@ -785,8 +808,9 @@ function showRib(){
   $('vRibs').textContent=$('sRibs').value;
   $('vWide').textContent=parseFloat($('sWide').value).toFixed(2)+'×';
   $('vSoft').textContent=parseFloat($('sSoft').value).toFixed(2);
+  $('vFlame').textContent=parseFloat($('sFlame').value).toFixed(2);
 }
-[['sRibs','aias.ribs'],['sWide','aias.wide'],['sSoft','aias.soft'],['sSize','aias.size'],
+[['sRibs','aias.ribs'],['sWide','aias.wide'],['sSoft','aias.soft'],['sFlame','aias.flame'],['sSize','aias.size'],
  ['sGlow','aias.glow'],['sMot','aias.mot']].forEach(function(pr){
   var el=$(pr[0]);
   try{ var v=localStorage.getItem(pr[1]); if(v!==null) el.value=v; }catch(e){}
