@@ -143,6 +143,7 @@
   <button class="sb sy" data-sy="ribbons">Κορδέλες</button>
   <button class="sb sy" data-sy="stellar">Μαγνητική παγίδα</button>
   <button class="sb sy" data-sy="wave">Κυματικός πυρήνας</button>
+  <button class="sb sy" data-sy="torus">Τόρος</button>
 
   <h3>Κορδέλες</h3>
   <label>Πόσες <span id="vRibs">5</span>
@@ -463,7 +464,7 @@ function strokeBundles(g,lv,bright,lw){
    σφαίρα με λεπτή υφή και φωτεινό χείλος εκεί που οι μεσημβρινοί
    συγκλίνουν. Όσο μιλάει, τα κύματα υψώνονται σε κορυφές.
    ================================================================== */
-var WX=new Float32Array(160), WY=new Float32Array(160), WZ=new Float32Array(160);
+var WX=new Float32Array(200), WY=new Float32Array(160), WZ=new Float32Array(160);
 var wAcc=[0,0,0];
 
 /* Το κύμα υπολογίζεται στον χώρο, όχι σε γεωγραφικό μήκος και πλάτος.
@@ -527,6 +528,56 @@ function waveCore(M,R,cx,cy,lv,br,NR,PT){
   }
 }
 
+/* ==================================================================
+   2γ. ΤΟΡΟΣ — δύο δακτύλιοι με κάθετους άξονες.
+   Κάθε δακτύλιος σχεδιάζεται με ελικοειδείς γραμμές που τυλίγονται
+   γύρω από τον σωλήνα του: η ενέργεια φαίνεται να ρέει μέσα στον
+   δακτύλιο αντί να κάθεται πάνω του.
+   ================================================================== */
+var TOR=[
+  /* Οι δύο άξονες είναι κάθετοι μεταξύ τους αλλά και οι δύο λοξοί ως
+     προς τη ματιά, ώστε να φαίνονται οι τρύπες. Με άξονες πάνω στους
+     άξονες της οθόνης, και οι δύο δακτύλιοι έβγαιναν από την κόψη και
+     το σύνολο διαβαζόταν σαν σταυρός από σωλήνες. */
+  /* ξαπλωτός: ο άξονας σχεδόν κατακόρυφος, τον βλέπεις σαν πλατιά έλλειψη */
+  {nx:0, ny:0.900, nz:0.440,  ux:1,uy:0,uz:0,  vx:0, vy:0.440, vz:-0.900, W:5, acc:0, maj:0, sp: 0.62, mj: 0.16},
+  /* όρθιος και κάθετος στον πρώτο: ο άξονας δείχνει προς τα εσένα */
+  {nx:0.414, ny:0.400, nz:-0.818, ux:0.8925,uy:0,uz:0.4517, vx:0.1807,vy:-0.9170,vz:-0.3570, W:7, acc:0, maj:0, sp:-0.48, mj:-0.12},
+  {nx:1, ny:0, nz:0, ux:0,uy:1,uz:0, vx:0,vy:0,vz:1, W:6, acc:0, maj:0, sp: 0.38, mj: 0.09},
+  {nx:0.5774,ny:0.5774,nz:0.5774, ux:0.7071,uy:-0.7071,uz:0, vx:0.4082,vy:0.4082,vz:-0.8165, W:8, acc:0, maj:0, sp:-0.31, mj:-0.07}
+];
+function torusStyle(M,R,cx,cy,lv,br,NT,LINES,PT){
+  var Rm=0.76, rmB=0.155*WIDE*(1+0.14*lv+0.10*br);
+  var t,k,i,g,th,ct,st,ang,rr,bb,sn,x,y,z,vx,vy,vz,pr,step=TAU/PT;
+  if(NT>TOR.length) NT=TOR.length;
+  for(t=0;t<NT;t++){
+    g=TOR[t];
+    for(k=0;k<LINES;k++){
+      var ph=k*TAU/LINES+g.acc;
+      for(i=0;i<=PT;i++){
+        th=i*step+g.maj;
+        ct=Math.cos(th); st=Math.sin(th);
+        ang=g.W*(i*step)+ph;
+        rr=rmB*(1+(0.06+0.10*lv)*Math.sin(3*i*step+g.acc*1.7));
+        bb=Rm+rr*Math.cos(ang); sn=rr*Math.sin(ang);
+        x=bb*(ct*g.ux+st*g.vx)+sn*g.nx;
+        y=bb*(ct*g.uy+st*g.vy)+sn*g.ny;
+        z=bb*(ct*g.uz+st*g.vz)+sn*g.nz;
+        vx=M[0]*x+M[1]*y+M[2]*z; vy=M[3]*x+M[4]*y+M[5]*z; vz=M[6]*x+M[7]*y+M[8]*z;
+        if(FLAME>0){
+          var uu=0.5*(1-vy); if(uu<0)uu=0; else if(uu>1)uu=1;
+          var tp=uu*uu*Math.sqrt(uu);
+          var kx=1-FLAME*1.15*tp+FLAME*0.12*(1-uu); if(kx<0.10) kx=0.10;
+          vx=vx*kx+FLAME*SWAY*tp; vz*=kx; vy-=FLAME*0.34*tp;
+        }
+        pr=3.3/(3.3-vz);
+        WX[i]=cx+vx*R*pr; WY[i]=cy+vy*R*pr; WZ[i]=vz;
+      }
+      emit(PT,7);
+    }
+  }
+}
+
 /* ---------- ένα καρέ ----------
    Οι ίνες χτίζονται μία φορά σε συντεταγμένες οθόνης και ζωγραφίζονται
    δύο φορές: κανονικά, και σμικρυμένες στον καμβά της λάμψης. Έτσι δεν
@@ -557,14 +608,22 @@ function drawScene(t,dt,lv,br){
   FLAME=parseFloat($('sFlame').value);
   SWAY=(0.10+0.10*lv)*(Math.sin(t*0.37)*0.6+Math.sin(t*0.23+1.7)*0.4);
   var flowK=(1.0+1.70*lv+2.20*glowEnv)*motion;
-  var SB=(STYLE==='wave'?0.58:(STYLE==='stellar'?0.95:1));
-  var SH=(STYLE==='wave'?0.60:(STYLE==='stellar'?0.55:1));
+  var SB=(STYLE==='wave'?0.58:(STYLE==='stellar'?0.95:(STYLE==='torus'?1.05:1)));
+  var SH=(STYLE==='wave'?0.60:(STYLE==='stellar'?0.55:(STYLE==='torus'?0.72:1)));
   var bright=(0.76+0.20*lv+0.34*glowEnv+0.15*mixListen+0.14*br)*glowK*SB;
 
   PATHS=[]; for(var pi=0;pi<BANDS*2;pi++) PATHS.push(new Path2D());
   var nrib=Math.min(NRIB, parseInt($('sRibs').value,10)||5);
 
-  if(STYLE==='wave'){
+  if(STYLE==='torus'){
+    for(var ti=0;ti<TOR.length;ti++){
+      TOR[ti].acc=wrap(TOR[ti].acc+dt*TOR[ti].sp*flowK);
+      TOR[ti].maj=wrap(TOR[ti].maj+dt*TOR[ti].mj*flowK);
+    }
+    torusStyle(MG,R,cx,cy,lv,br, Math.max(2,Math.min(4,nrib-3)),
+               Math.max(10,Math.round(Q.S*0.46)), Q.P<70?72:96);
+    DEPMIN=0.26;
+  } else if(STYLE==='wave'){
     for(var wi=0;wi<3;wi++) wAcc[wi]=wrap(wAcc[wi]+dt*(0.55+wi*0.22)*flowK);
     waveCore(MG,R,cx,cy,lv,br, Math.round((22+nrib*7)*(0.62+0.19*tier)), Q.P<70?56:80);
     DEPMIN=0.10;
