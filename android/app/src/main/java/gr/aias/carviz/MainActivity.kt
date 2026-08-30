@@ -1,0 +1,45 @@
+package gr.aias.carviz
+
+import android.os.Bundle
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+
+/**
+ * Η οθόνη στο κινητό. Στη δοκιμή δεν κάνει τίποτα παρά να θυμίζει τα
+ * βήματα — υπάρχει κυρίως για να έχει η εφαρμογή εικονίδιο εκκίνησης.
+ * Στη συνέχεια εδώ θα μπουν τα διαγνωστικά, ώστε να μη χρειάζεται logcat.
+ */
+class MainActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val tv = TextView(this).apply {
+            setPadding(56, 72, 56, 56)
+            textSize = 16f
+            text = """
+                ΑΙΑΣ — δοκιμή Android Auto
+
+                Αυτή η εκδοχή δεν δείχνει τη σφαίρα. Ζωγραφίζει μόνο μια
+                γραμμή που σαρώνει, για να απαντήσει σε μία ερώτηση:
+                παίρνει η εφαρμογή επιφάνεια στην οθόνη του αυτοκινήτου;
+
+                Πριν συνδέσεις:
+
+                1. Άνοιξε την εφαρμογή Android Auto στο κινητό.
+                2. Πάτα δέκα φορές τον αριθμό έκδοσης, ώστε να εμφανιστούν
+                   οι ρυθμίσεις προγραμματιστή.
+                3. Στο μενού των τριών τελειών, «Ρυθμίσεις προγραμματιστή».
+                4. Ενεργοποίησε το «Unknown sources».
+                5. Επανεκκίνησε το Android Auto και σύνδεσε στο αυτοκίνητο.
+
+                Στην οθόνη του αυτοκινήτου, ψάξε τον ΑΙΑΝΤΑ ανάμεσα στις
+                εφαρμογές πλοήγησης.
+
+                Αν εμφανιστεί, σημείωσε τις διαστάσεις και τα καρέ ανά
+                δευτερόλεπτο που γράφει επάνω αριστερά — αυτά χρειάζονται
+                για τη ρύθμιση του πραγματικού renderer.
+            """.trimIndent()
+        }
+        setContentView(ScrollView(this).apply { addView(tv) })
+    }
+}
