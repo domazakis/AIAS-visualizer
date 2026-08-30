@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>ΑΙΑΣ — δρόμος</title>
@@ -152,6 +153,7 @@
   <div class="tog"><span>Φωνή (TTS)</span><input type="checkbox" id="tTts" checked></div>
   <div class="tog"><span>Λεζάντες</span><input type="checkbox" id="tCap" checked></div>
   <button class="sb" id="again">Επανάληψη σεναρίου</button>
+  <button class="sb" id="fsBtn">Πλήρης οθόνη</button>
   <p class="note">Η ταχύτητα του δρόμου είναι σταθερή και δεν εξαρτάται από τη φωνή. Αυτό που αλλάζει είναι πόσο μακριά φτάνει το φως.</p>
 </div>
 
@@ -627,6 +629,31 @@ requestAnimationFrame(function(t){ last=t; loop(t); });
 showCap('ΑΙΑΣ','','ΣΙΩΠΗ',false);
 markBtn('idle');
 poke();
+
+/* ---------- εγκαταστάσιμη εφαρμογή: πλήρης οθόνη, οθόνη που δεν σβήνει ----------
+   Ίδια μοτίβα με το index.html. Το wake lock χάνεται όταν φύγει η σελίδα
+   στο παρασκήνιο, γι' αυτό ξαναζητιέται σε κάθε επιστροφή.               */
+var wakeLock=null;
+async function requestWakeLock(){
+  try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); } }catch(e){}
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible') requestWakeLock();
+});
+$('fsBtn').addEventListener('click',async function(){
+  var el=document.documentElement;
+  if(!document.fullscreenElement){
+    try{
+      await el.requestFullscreen();
+      if(screen.orientation && screen.orientation.lock){ screen.orientation.lock('landscape').catch(function(){}); }
+    }catch(e){}
+  }else if(document.exitFullscreen){ document.exitFullscreen(); }
+  $('panel').classList.remove('open');
+  setTimeout(resize,300);
+});
+if('serviceWorker' in navigator){
+  window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+}
 
 /* γέφυρα για τη φάση 2 (μικρόφωνο / ElevenLabs) */
 window.AIAS={

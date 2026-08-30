@@ -1,8 +1,10 @@
 /* ΑΙΑΣ — offline cache */
-const CACHE = 'aias-v2';
+const CACHE = 'aias-v3';
 const ASSETS = [
   './',
   './index.html',
+  './v4.html',
+  './road.html',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
@@ -11,7 +13,12 @@ const ASSETS = [
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+    /* Κάθε αρχείο χωριστά. Με addAll, ένα και μόνο αρχείο που λείπει
+       —π.χ. το road.html σε κλαδί που δεν το έχει— ακυρώνει ολόκληρη
+       την εγκατάσταση του service worker. */
+    caches.open(CACHE)
+      .then((c) => Promise.all(ASSETS.map((u) => c.add(u).catch(() => {}))))
+      .then(() => self.skipWaiting())
   );
 });
 
