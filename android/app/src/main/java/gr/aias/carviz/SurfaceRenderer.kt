@@ -45,6 +45,16 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
     var status: String = "δεν έχει δοθεί επιφάνεια ακόμη"
         private set
 
+    /**
+     * Κάθε τι που μαθαίνουμε γράφεται και μόνιμα, γιατί στο αυτοκίνητο δεν
+     * υπάρχει adb για logcat — το καλώδιο πιάνει τη θύρα του κινητού.
+     */
+    private fun note(key: String, value: String) {
+        try { Diag.put(carContext, key, value) } catch (e: Throwable) {
+            Log.w(TAG, "αποτυχία εγγραφής διαγνωστικών", e)
+        }
+    }
+
     private val bg = Paint().apply { color = Color.BLACK }
     private val stroke = Paint().apply {
         isAntiAlias = true
@@ -75,17 +85,24 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
             status = "επιφάνεια ${surfaceContainer.width}×${surfaceContainer.height}, " +
                      "${surfaceContainer.dpi} dpi"
             Log.i(TAG, "onSurfaceAvailable: $status")
+            // Αυτή η μία γραμμή είναι η απάντηση στο ερώτημα του βήματος 1:
+            // ο host μας παραχώρησε επιφάνεια.
+            note("κατάσταση", "ΝΑΙ — ο host έδωσε επιφάνεια")
+            note("επιφάνεια", "${surfaceContainer.width} × ${surfaceContainer.height}, " +
+                              "${surfaceContainer.dpi} dpi")
             start()
         }
 
         override fun onVisibleAreaChanged(area: Rect) {
             visible = Rect(area)
             Log.i(TAG, "onVisibleAreaChanged: $area")
+            note("ορατή", "${area.width()} × ${area.height()} @ ${area.left},${area.top}")
         }
 
         override fun onStableAreaChanged(area: Rect) {
             stable = Rect(area)
             Log.i(TAG, "onStableAreaChanged: $area")
+            note("σταθερή", "${area.width()} × ${area.height()} @ ${area.left},${area.top}")
         }
 
         override fun onSurfaceDestroyed(surfaceContainer: SurfaceContainer) {
@@ -93,11 +110,16 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
             stop()
             container = null
             status = "η επιφάνεια αποσύρθηκε"
+            note("κατάσταση", "η επιφάνεια αποσύρθηκε (φυσιολογικό στην αποσύνδεση)")
         }
     }
 
     override fun onCreate(owner: LifecycleOwner) {
         Log.i(TAG, "εγγραφή SurfaceCallback")
+        // Καθαρίζουμε ό,τι έμεινε από προηγούμενη σύνδεση, αλλιώς δεν
+        // ξεχωρίζει η χθεσινή δοκιμή από τη σημερινή.
+        Diag.clear(carContext)
+        note("κατάσταση", "η υπηρεσία ξεκίνησε, αναμονή επιφάνειας")
         carContext.getCarService(AppManager::class.java).setSurfaceCallback(callback)
         status = "ο SurfaceCallback καταχωρήθηκε, αναμονή επιφάνειας"
     }
@@ -111,9 +133,11 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
         running = true
         thread = Thread {
             var frames = 0
+            var total = 0L
             var mark = System.nanoTime()
             var fps = 0.0
             var phase = 0f
+            var reported = false
             while (running) {
                 val c = container
                 val surface = c?.surface
@@ -124,8 +148,15 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
                         phase += 0.010f
                         if (phase > 1f) phase -= 1f
                         draw(canvas, c.width, c.height, phase, fps)
+                        total++
                     } catch (e: Throwable) {
                         Log.w(TAG, "αποτυχία σχεδίασης", e)
+                        // Μόνο το πρώτο σφάλμα· αλλιώς γράφουμε στον δίσκο
+                        // εξήντα φορές το δευτερόλεπτο.
+                        if (!reported) {
+                            reported = true
+                            note("σφάλμα", "στη σχεδίαση: $e")
+                        }
                     } finally {
                         if (canvas != null) {
                             try { surface.unlockCanvasAndPost(canvas) } catch (e: Throwable) { }
@@ -138,10 +169,20 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
                     fps = frames * 1e9 / (now - mark)
                     frames = 0
                     mark = now
+                    // Το σύνολο των καρέ είναι η απόδειξη ότι πράγματι
+                    // ζωγραφίστηκε κάτι, όχι μόνο ότι δόθηκε επιφάνεια.
+                    note("καρέ", "${"%.0f".format(fps)} fps, σύνολο $total")
                 }
                 try { Thread.sleep(16) } catch (e: InterruptedException) { break }
             }
-        }.also { it.name = "aias-render"; it.start() }
+        }.also {
+            it.name = "aias-render"
+            it.setUncaughtExceptionHandler { _, e ->
+                Log.e(TAG, "το νήμα σχεδίασης τερματίστηκε από εξαίρεση", e)
+                note("σφάλμα", "το νήμα σχεδίασης πέθανε: $e")
+            }
+            it.start()
+        }
     }
 
     private fun stop() {
