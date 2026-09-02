@@ -1,10 +1,11 @@
 /* ΑΙΑΣ — offline cache */
-const CACHE = 'aias-v3';
+const CACHE = 'aias-v4';
 const ASSETS = [
   './',
   './index.html',
   './v4.html',
   './road.html',
+  './bars.html',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
