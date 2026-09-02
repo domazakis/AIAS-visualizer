@@ -140,23 +140,17 @@
     <button class="sb" data-st="high">Μιλάει · υψηλά</button>
   </div>
 
-  <h3>Στυλ</h3>
-  <button class="sb sy" data-sy="ribbons">Κορδέλες</button>
-  <button class="sb sy" data-sy="stellar">Μαγνητική παγίδα</button>
-  <button class="sb sy" data-sy="wave">Κυματικός πυρήνας</button>
-  <button class="sb sy" data-sy="torus">Τόρος</button>
-
   <h3>Κορδέλες</h3>
-  <label>Πόσες <span id="vRibs">5</span>
-    <input type="range" id="sRibs" min="2" max="7" step="1" value="5"></label>
-  <label>Πλάτος <span id="vWide">1.10×</span>
-    <input type="range" id="sWide" min="0.3" max="2.4" step="0.05" value="1.1"></label>
+  <label>Πόσες <span id="vRibs">3</span>
+    <input type="range" id="sRibs" min="2" max="7" step="1" value="3"></label>
+  <label>Πλάτος <span id="vWide">1.70×</span>
+    <input type="range" id="sWide" min="0.3" max="2.4" step="0.05" value="1.7"></label>
 
-  <label>Σχήμα φλόγας <span id="vFlame">0.50</span>
-    <input type="range" id="sFlame" min="0" max="1" step="0.05" value="0.5"></label>
+  <label>Σχήμα φλόγας <span id="vFlame">0.30</span>
+    <input type="range" id="sFlame" min="0" max="1" step="0.05" value="0.3"></label>
 
-  <label>Απαλότητα <span id="vSoft">0.70</span>
-    <input type="range" id="sSoft" min="0" max="1" step="0.05" value="0.7"></label>
+  <label>Απαλότητα <span id="vSoft">0.00</span>
+    <input type="range" id="sSoft" min="0" max="1" step="0.05" value="0"></label>
 
   <h3>Εμφάνιση</h3>
   <label>Μέγεθος <input type="range" id="sSize" min="0.6" max="1.5" step="0.02" value="1"></label>
@@ -325,8 +319,8 @@ addEventListener('resize',resize);
 addEventListener('orientationchange',function(){ setTimeout(resize,150); });
 
 /* ---------- μία κορδέλα ---------- */
-var BANDS=5, PATHS=null, WIDE=1, FLAME=0, SWAY=0, DEPMIN=0.40;
-var STYLE='ribbons';
+var BANDS=5, PATHS=null, WIDE=1, FLAME=0, SWAY=0;
+var DEPMIN=0.40;
 function wrap(a){ return a>=TAU?a-TAU:(a<0?a+TAU:a); }
 var TRAILFADE=0.42, TRAILK=TRAILFADE;   /* ισοσταθμιστής ουράς: μόνιμη κατάσταση = A/f */
 function setSoft(){ var v=parseFloat($('sSoft').value);
@@ -358,7 +352,7 @@ function ribbon(M,f,P,NCH,S,R,cx,cy,t,lv,br,motion,calm){
     HC[q3]=X2*kk+f.ofx; HC[q3+1]=Y2*kk+f.ofy; HC[q3+2]=Z2*kk+f.ofz;
   }
 
-  var hwK=f.hw*WIDE*(STYLE==='stellar'?0.10:1)*(1+0.34*lv+0.24*br)*(1-0.26*calm);
+  var hwK=f.hw*WIDE*(1+0.34*lv+0.24*br)*(1-0.26*calm);
   var ripK=f.rip*(1+1.05*lv+0.65*br)*(1-0.40*calm);
   var foldK=f.fold*(1+0.85*lv+0.50*br)*(1-0.30*calm);
   var SOFT=0.80, SHELL=0.97+0.04*lv+0.02*br;
@@ -460,130 +454,6 @@ function strokeBundles(g,lv,bright,lw){
   }
 }
 
-/* ==================================================================
-   2β. ΚΥΜΑΤΙΚΟΣ ΠΥΡΗΝΑΣ — πλέγμα σφαίρας με κύματα στην επιφάνεια.
-   Στην ησυχία η ακτίνα είναι σχεδόν σταθερή, οπότε βλέπεις καθαρή
-   σφαίρα με λεπτή υφή και φωτεινό χείλος εκεί που οι μεσημβρινοί
-   συγκλίνουν. Όσο μιλάει, τα κύματα υψώνονται σε κορυφές.
-   ================================================================== */
-var WX=new Float32Array(200), WY=new Float32Array(160), WZ=new Float32Array(160);
-var wAcc=[0,0,0];
-
-/* Το κύμα υπολογίζεται στον χώρο, όχι σε γεωγραφικό μήκος και πλάτος.
-   Σε γεωγραφικές συντεταγμένες η ακτίνα στον πόλο εξαρτιόταν από το
-   μήκος, που εκεί είναι απροσδιόριστο — και η σφαίρα έσκιζε σε μύτη. */
-function wave3(x,y,z){
-  return 0.50*Math.sin( 4.6*x+3.3*y-2.1*z+wAcc[0])
-       + 0.32*Math.sin(-2.7*x+6.4*y+3.9*z+wAcc[1])
-       + 0.22*Math.sin( 4.0*x-5.1*y+6.2*z+wAcc[2]);
-}
-
-/* Ισότροπο δίκτυο: μέγιστοι κύκλοι με άξονες απλωμένους με van der
-   Corput. Δεν υπάρχουν πόλοι, άρα δεν διαβάζεται σαν υδρόγειος. */
-var NRING=64, RING=[];
-(function(){
-  for(var k=0;k<NRING;k++){
-    var z=2*vdc(k+1)-1, r=Math.sqrt(Math.max(0,1-z*z)), th=k*2.39996;
-    var nx=r*Math.cos(th), ny=r*Math.sin(th), nz=z;
-    var hx=(Math.abs(nz)<0.9)?0:1, hz=(Math.abs(nz)<0.9)?1:0;
-    var ux=ny*hz-nz*0, uy=nz*hx-nx*hz, uz=nx*0-ny*hx;
-    var ul=Math.sqrt(ux*ux+uy*uy+uz*uz)||1; ux/=ul; uy/=ul; uz/=ul;
-    RING.push({ux:ux,uy:uy,uz:uz,
-               vx:ny*uz-nz*uy, vy:nz*ux-nx*uz, vz:nx*uy-ny*ux});
-  }
-})();
-
-function emit(n,CHN){
-  var per=n/CHN, c2,i,i0,i1,im,zb,pth;
-  for(c2=0;c2<CHN;c2++){
-    i0=Math.round(c2*per); i1=Math.round((c2+1)*per); if(i1<=i0) continue;
-    im=(i0+i1)>>1;
-    zb=(WZ[im]*0.5+0.5)*BANDS|0; if(zb<0) zb=0; if(zb>=BANDS) zb=BANDS-1;
-    pth=PATHS[zb];
-    pth.moveTo(WX[i0],WY[i0]);
-    for(i=i0+1;i<=i1;i++) pth.lineTo(WX[i],WY[i]);
-  }
-}
-
-function waveCore(M,R,cx,cy,lv,br,NR,PT){
-  var amp=(0.020+0.100*lv+0.055*br)*WIDE;
-  var k,i,g,ca,sa,dx,dy,dz,rr,x,y,z,vx,vy,vz,pr,st=TAU/PT;
-  if(NR>NRING) NR=NRING;
-  for(k=0;k<NR;k++){
-    g=RING[k];
-    for(i=0;i<=PT;i++){
-      ca=Math.cos(i*st); sa=Math.sin(i*st);
-      dx=ca*g.ux+sa*g.vx; dy=ca*g.uy+sa*g.vy; dz=ca*g.uz+sa*g.vz;
-      rr=1+amp*wave3(dx,dy,dz);
-      x=rr*dx; y=rr*dy; z=rr*dz;
-      vx=M[0]*x+M[1]*y+M[2]*z; vy=M[3]*x+M[4]*y+M[5]*z; vz=M[6]*x+M[7]*y+M[8]*z;
-      if(FLAME>0){
-        var uu=0.5*(1-vy); if(uu<0)uu=0; else if(uu>1)uu=1;
-        var tp=uu*uu*Math.sqrt(uu);
-        var kx=1-FLAME*1.15*tp+FLAME*0.12*(1-uu); if(kx<0.10) kx=0.10;
-        vx=vx*kx+FLAME*SWAY*tp; vz*=kx; vy-=FLAME*0.34*tp;
-      }
-      pr=3.3/(3.3-vz);
-      WX[i]=cx+vx*R*pr; WY[i]=cy+vy*R*pr; WZ[i]=vz;
-    }
-    emit(PT,7);
-  }
-}
-
-/* ==================================================================
-   2γ. ΤΟΡΟΣ — δύο δακτύλιοι με κάθετους άξονες.
-   Κάθε δακτύλιος σχεδιάζεται με ελικοειδείς γραμμές που τυλίγονται
-   γύρω από τον σωλήνα του: η ενέργεια φαίνεται να ρέει μέσα στον
-   δακτύλιο αντί να κάθεται πάνω του.
-   ================================================================== */
-var TOR=[
-  /* Δύο ομόκεντροι κύκλοι με ακριβώς κάθετους άξονες (εσωτερικό
-     γινόμενο μηδέν). Δεν γίνεται να φαίνονται και οι δύο σαν ανοιχτές
-     ελλείψεις: αν γείρουν και οι δύο το ίδιο προς τον θεατή, οι κάθετοί
-     τους πέφτουν στην ίδια ευθεία της οθόνης και βλέπεις δύο ελλείψεις
-     με τον ίδιο άξονα. Η ευανάγνωστη στάση είναι ο ένας απέναντι
-     (φαίνεται ολόκληρος κύκλος) και ο άλλος να τον διαπερνά. */
-  {nx:+0.2995, ny:+0.2196, nz:+0.9285, ux:-0.9517, uy:+0.0000, uz:+0.3070,
-   vx:+0.0674, vy:-0.9756, vz:+0.2090, W:5, acc:0, maj:0, sp:+0.62, mj:+0.16},
-  {nx:-0.9517, ny:+0.0000, nz:+0.3070, ux:+0.0000, uy:+1.0000, uz:+0.0000,
-   vx:-0.3070, vy:+0.0000, vz:-0.9517, W:7, acc:0, maj:0, sp:-0.48, mj:-0.12},
-  /* ο τρίτος ορθογώνιος άξονας, για όποιον θέλει γυροσκόπιο */
-  {nx:+0.0674, ny:-0.9756, nz:+0.2090, ux:-0.9976, uy:-0.0690, uz:+0.0000,
-   vx:+0.0144, vy:-0.2085, vz:-0.9779, W:6, acc:0, maj:0, sp:+0.38, mj:+0.09},
-  {nx:0.5774,ny:0.5774,nz:0.5774, ux:0.7071,uy:-0.7071,uz:0, vx:0.4082,vy:0.4082,vz:-0.8165, W:8, acc:0, maj:0, sp:-0.31, mj:-0.07}
-];
-function torusStyle(M,R,cx,cy,lv,br,NT,LINES,PT){
-  var Rm=0.76, rmB=0.155*WIDE*(1+0.14*lv+0.10*br);
-  var t,k,i,g,th,ct,st,ang,rr,bb,sn,x,y,z,vx,vy,vz,pr,step=TAU/PT;
-  if(NT>TOR.length) NT=TOR.length;
-  for(t=0;t<NT;t++){
-    g=TOR[t];
-    for(k=0;k<LINES;k++){
-      var ph=k*TAU/LINES+g.acc;
-      for(i=0;i<=PT;i++){
-        th=i*step+g.maj;
-        ct=Math.cos(th); st=Math.sin(th);
-        ang=g.W*(i*step)+ph;
-        rr=rmB*(1+(0.06+0.10*lv)*Math.sin(3*i*step+g.acc*1.7));
-        bb=Rm+rr*Math.cos(ang); sn=rr*Math.sin(ang);
-        x=bb*(ct*g.ux+st*g.vx)+sn*g.nx;
-        y=bb*(ct*g.uy+st*g.vy)+sn*g.ny;
-        z=bb*(ct*g.uz+st*g.vz)+sn*g.nz;
-        vx=M[0]*x+M[1]*y+M[2]*z; vy=M[3]*x+M[4]*y+M[5]*z; vz=M[6]*x+M[7]*y+M[8]*z;
-        if(FLAME>0){
-          var uu=0.5*(1-vy); if(uu<0)uu=0; else if(uu>1)uu=1;
-          var tp=uu*uu*Math.sqrt(uu);
-          var kx=1-FLAME*1.15*tp+FLAME*0.12*(1-uu); if(kx<0.10) kx=0.10;
-          vx=vx*kx+FLAME*SWAY*tp; vz*=kx; vy-=FLAME*0.34*tp;
-        }
-        pr=3.3/(3.3-vz);
-        WX[i]=cx+vx*R*pr; WY[i]=cy+vy*R*pr; WZ[i]=vz;
-      }
-      emit(PT,7);
-    }
-  }
-}
-
 /* ---------- ένα καρέ ----------
    Οι ίνες χτίζονται μία φορά σε συντεταγμένες οθόνης και ζωγραφίζονται
    δύο φορές: κανονικά, και σμικρυμένες στον καμβά της λάμψης. Έτσι δεν
@@ -614,27 +484,11 @@ function drawScene(t,dt,lv,br){
   FLAME=parseFloat($('sFlame').value);
   SWAY=(0.10+0.10*lv)*(Math.sin(t*0.37)*0.6+Math.sin(t*0.23+1.7)*0.4);
   var flowK=(1.0+1.70*lv+2.20*glowEnv)*motion;
-  var SB=(STYLE==='wave'?0.58:(STYLE==='stellar'?0.95:(STYLE==='torus'?1.20:1)));
-  var SH=(STYLE==='wave'?0.60:(STYLE==='stellar'?0.55:(STYLE==='torus'?0.72:1)));
-  var bright=(0.76+0.20*lv+0.34*glowEnv+0.15*mixListen+0.14*br)*glowK*SB;
+  var bright=(0.76+0.20*lv+0.34*glowEnv+0.15*mixListen+0.14*br)*glowK;
 
   PATHS=[]; for(var pi=0;pi<BANDS*2;pi++) PATHS.push(new Path2D());
-  var nrib=Math.min(NRIB, parseInt($('sRibs').value,10)||5);
+  var nrib=Math.min(NRIB, parseInt($('sRibs').value,10)||3);
 
-  if(STYLE==='torus'){
-    for(var ti=0;ti<TOR.length;ti++){
-      TOR[ti].acc=wrap(TOR[ti].acc+dt*TOR[ti].sp*flowK);
-      TOR[ti].maj=wrap(TOR[ti].maj+dt*TOR[ti].mj*flowK);
-    }
-    torusStyle(MG,R,cx,cy,lv,br, Math.max(2,Math.min(4,nrib-3)),
-               Math.max(10,Math.round(Q.S*0.46)), Q.P<70?72:96);
-    DEPMIN=0.26;
-  } else if(STYLE==='wave'){
-    for(var wi=0;wi<3;wi++) wAcc[wi]=wrap(wAcc[wi]+dt*(0.55+wi*0.22)*flowK);
-    waveCore(MG,R,cx,cy,lv,br, Math.round((22+nrib*7)*(0.62+0.19*tier)), Q.P<70?56:80);
-    DEPMIN=0.10;
-  } else {
-  DEPMIN=0.40;
   for(var i=0;i<nrib;i++){
     var f=RIB[i];
     /* Οι φάσεις ολοκληρώνονται στον χρόνο. Αν τις υπολογίζαμε ως
@@ -654,8 +508,7 @@ function drawScene(t,dt,lv,br){
        δημιουργούσε ακριβώς το πήδημα που μόλις διορθώσαμε */
     f.accFlow += dt*f.flow*flowK;
     var Mi=mul(MG, axisRot(f.axx,f.axy,f.axz, f.accAx));
-    ribbon(Mi,f,Q.P,Q.CH,STYLE==='stellar'?3:Q.S,R,cx,cy,t,lv,br,motion,mixListen);
-  }
+    ribbon(Mi,f,Q.P,Q.CH,Q.S,R,cx,cy,t,lv,br,motion,mixListen);
   }
 
   /* 1. ορατός καμβάς */
@@ -681,14 +534,14 @@ function drawScene(t,dt,lv,br){
 
   var ccy=cy+FLAME*R*0.16;
   var core=g2.createRadialGradient(cx,ccy,0,cx,ccy,R*1.05);
-  core.addColorStop(0,   'rgba(255,204,140,'+((0.009+0.105*glowEnv+0.018*mixListen)*glowK*SH).toFixed(3)+')');
-  core.addColorStop(0.55,'rgba(255,144,46,'+((0.004+0.055*glowEnv)*glowK*SH).toFixed(3)+')');
+  core.addColorStop(0,   'rgba(255,204,140,'+((0.009+0.105*glowEnv+0.018*mixListen)*glowK).toFixed(3)+')');
+  core.addColorStop(0.55,'rgba(255,144,46,'+((0.004+0.055*glowEnv)*glowK).toFixed(3)+')');
   core.addColorStop(1,   'rgba(255,110,20,0)');
   g2.fillStyle=core; g2.beginPath(); g2.arc(cx,ccy,R*1.05,0,TAU); g2.fill();
 
   var hr=R*(2.05+0.60*glowEnv);
   var halo=g2.createRadialGradient(cx,cy,R*0.9,cx,cy,hr);
-  halo.addColorStop(0,'rgba(255,146,52,'+((0.010+0.105*glowEnv)*glowK*SH).toFixed(3)+')');
+  halo.addColorStop(0,'rgba(255,146,52,'+((0.010+0.105*glowEnv)*glowK).toFixed(3)+')');
   halo.addColorStop(1,'rgba(255,110,20,0)');
   g2.fillStyle=halo; g2.beginPath(); g2.arc(cx,cy,hr,0,TAU); g2.fill();
   g2.setTransform(1,0,0,1,0,0);
@@ -943,23 +796,6 @@ $('gear').addEventListener('click',function(){ $('panel').classList.toggle('open
   });
 });
 $('again').addEventListener('click',function(){ startScript(); $('panel').classList.remove('open'); });
-[].forEach.call(document.querySelectorAll('.sb[data-sy]'),function(b){
-  b.addEventListener('click',function(){
-    STYLE=b.getAttribute('data-sy');
-    try{ localStorage.setItem('aias.style',STYLE); }catch(e){}
-    /* τα δύο νέα στυλ είναι σφαίρες: μηδενίζουμε τη φλόγα */
-    if(STYLE!=='ribbons'){ $('sFlame').value=0; $('sFlame').dispatchEvent(new Event('input')); }
-    markStyle();
-  });
-});
-function markStyle(){
-  [].forEach.call(document.querySelectorAll('.sb[data-sy]'),function(b){
-    b.classList.toggle('act', b.getAttribute('data-sy')===STYLE);
-  });
-}
-try{ var _st=localStorage.getItem('aias.style'); if(_st) STYLE=_st; }catch(e){}
-markStyle();
-
 $('go').addEventListener('click',function(){
   $('ov').classList.add('hidden');
   if('speechSynthesis' in window){ try{ speechSynthesis.cancel(); }catch(e){} }
