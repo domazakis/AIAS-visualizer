@@ -1,0 +1,12 @@
+# Ό,τι αφήνει πίσω του το Gradle όταν δοκιμάζουμε το χτίσιμο του Android.
+# Είναι κρυφή μνήμη — ξαναφτιάχνεται μόνη της και δεν έχει θέση στο repo.
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.cxx/
+
+# εργαλεία και προσωρινά
+node_modules/
+.DS_Store
