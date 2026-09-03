@@ -138,9 +138,9 @@
   <label>Πόσες <span id="vCount">5</span>
     <input type="range" id="sCount" min="3" max="5" step="1" value="5"></label>
   <label>Πάχος τελείας <span id="vThick">1.00×</span>
-    <input type="range" id="sThick" min="0.6" max="1.8" step="0.05" value="1"></label>
-  <label>Ύψος στην ομιλία <span id="vHeight">7.7 × Δ</span>
-    <input type="range" id="sHeight" min="1.5" max="10" step="0.1" value="7.7"></label>
+    <input type="range" id="sThick" min="0.6" max="1.5" step="0.05" value="1"></label>
+  <label>Ύψος στην ομιλία <span id="vHeight">4.7 × Δ</span>
+    <input type="range" id="sHeight" min="1.2" max="7" step="0.1" value="4.7"></label>
   <label>Απόσταση <span id="vSpace">1.08 × Δ</span>
     <input type="range" id="sSpace" min="1.02" max="2.5" step="0.02" value="1.08"></label>
   <label>Ρυθμός <span id="vRate">1.00×</span>
@@ -213,20 +213,24 @@ var glowEnv=0;
    πιάστηκε στις κορδέλες.
    ================================================================== */
 var MAXB=5, NB=5;
-var ext=[], bnc=[], ph1=[], ph2=[];
-for(var k=0;k<MAXB;k++){ ext.push(0); bnc.push(0); ph1.push(k*1.73); ph2.push(k*2.91); }
+/* Μία και μόνη έκταση για όλες τις τελείες: όταν ανεβαίνει, ανεβαίνουν
+   όλες μαζί, η καθεμιά προς το δικό της ταβάνι. Οι τελείες είναι ένα
+   σώμα που φουσκώνει, όχι πέντε φώτα που κινούνται ανεξάρτητα. */
+var EXT=0, ph1=0, ph2=0;
+var bnc=[];
+for(var k=0;k<MAXB;k++) bnc.push(0);
 
 var drum=0, tGlob=0;
 var REST=0.8;                    /* μικρή ανάσα πριν ξαναρχίσει, σε χτύπους */
 var HW=1.30;                     /* μισό πλάτος του κύματος, σε χτύπους */
-var THICK=1, RMAX=7.7, SPACING=1.08, RATE=1;
-var BAMP=0.42;                   /* βάθος βύθισης, σε διαμέτρους */
+var THICK=1, RMAX=4.7, SPACING=1.08, RATE=1;
+var BAMP=0.48;                   /* βάθος βύθισης, σε διαμέτρους */
 function wrap(a){ a%=TAU; return a<0?a+TAU:a; }
 
-/* Το βάρος κάθε θέσης. Με ταβάνι 7.7 διαμέτρους δίνει 7.70 στη μέση,
-   5.19 στις πλαϊνές και 2.68 στις ακριανές — ακριβώς 75% ψηλότερα από
-   τις προηγούμενες 4.40 / 2.97 / 1.54, σε όλες το ίδιο ποσοστό, οπότε η
-   σιλουέτα των προτύπων μένει η ίδια και απλώς τεντώνεται. Στα μισά ο
+/* Το βάρος κάθε θέσης. Με ταβάνι 4.7 διαμέτρους δίνει 4.70 στη μέση,
+   3.31 στις πλαϊνές και 1.93 στις ακριανές. Επειδή η διάμετρος
+   μεγάλωσε κατά 65%, σε απόλυτα μεγέθη η μεσαία μένει ακριβώς εκεί που
+   ήταν — αυτό που μεγάλωσε είναι η τελεία, όχι το ύψος. Στα μισά ο
    τύπος πέφτει ακριβώς στο 0.625, γιατί συν(π/4)² = 1/2. */
 function barW(i,n){
   if(n<2) return 1;
@@ -289,25 +293,20 @@ function stepBars(dt,lv,br){
     bnc[i] = (dd>-HW && dd<HW) ? 0.5*(1+Math.cos(Math.PI*dd/HW)) : 0;
   }
 
-  /* Οι φάσεις προχωράνε ΜΙΑ φορά η καθεμιά, όχι μία ανά τελεία που τις
-     δανείζεται. Είναι λιγότερες από τις τελείες: τρεις για πέντε. */
+  /* Ένας κυματισμός, κοινός. Επειδή κουνάει πλέον ολόκληρη την ομάδα
+     και όχι μία θέση, το βάθος του είναι μικρότερο απ' ό,τι ήταν όταν
+     κάθε τελεία είχε δικό της. */
   var sr=(0.85+2.10*lv)*RATE*(reduce?0.6:1);
-  var nph=(NB>>1)+1;
-  for(i=0;i<nph;i++){
-    ph1[i]=wrap(ph1[i]+dt*(1.55+0.42*i)*sr);
-    ph2[i]=wrap(ph2[i]+dt*(2.60+0.67*i)*sr);
-  }
+  ph1=wrap(ph1+dt*1.55*sr);
+  ph2=wrap(ph2+dt*2.60*sr);
+  var wob=0.72+0.28*(0.62*Math.sin(ph1)+0.38*Math.sin(ph2));
 
-  var kUp=1-Math.exp(-dt/0.035), kDn=1-Math.exp(-dt/0.115);
-  for(i=0;i<NB;i++){
-    var m=(i<NB-1-i)?i:NB-1-i;             /* ο καθρέφτης */
-    var wob=0.58+0.42*(0.62*Math.sin(ph1[m])+0.38*Math.sin(ph2[m]));
-    /* έκταση: μόνο στην ομιλία. Στη σιωπή σβήνει και μένει ο κύκλος. */
-    var sp=0.14+lv*1.35*wob+0.20*br; if(sp>1) sp=1; if(sp<0) sp=0;
-    var tg=sp*mixSpeak;
-    ext[i]+=(tg-ext[i])*(tg>ext[i]?kUp:kDn);
-    bnc[i]*=(1-mixSpeak);                  /* το κύμα σβήνει μόλις αρχίσει να μιλάει */
-  }
+  /* έκταση: μόνο στην ομιλία. Στη σιωπή σβήνει και μένουν οι κύκλοι. */
+  var sp=0.14+lv*1.35*wob+0.20*br; if(sp>1) sp=1; if(sp<0) sp=0;
+  var tg=sp*mixSpeak;
+  EXT += (tg-EXT)*(tg>EXT ? 1-Math.exp(-dt/0.035) : 1-Math.exp(-dt/0.115));
+
+  for(i=0;i<NB;i++) bnc[i]*=(1-mixSpeak);  /* το κύμα σβήνει μόλις αρχίσει να μιλάει */
 }
 
 /* ---------- η σχεδίαση, ίδια σε ορατό καμβά και σε καμβά λάμψης ----------
@@ -315,7 +314,7 @@ function stepBars(dt,lv,br){
    φωτός, και ο πυρήνας από πάνω. Δέκα πινελιές το καρέ.               */
 var LAY={x0:0, pitch:0, D:8, cy:0};
 function layout(){
-  var D=Math.min(CW,CH2)*0.075*THICK;
+  var D=Math.min(CW,CH2)*0.124*THICK;
   var pitch=D*SPACING, s;
   /* να χωράει και κατά πλάτος και στο μέγιστο ύψος της μεσαίας */
   var span=pitch*(NB-1)+D;
@@ -337,7 +336,7 @@ function paintBars(g,lv,bright){
        και την ανάβει. Ανάμεσα στα περάσματα η τελεία χαμηλώνει σε φως
        αντί να σβήνει. */
     Di=D*(1+0.12*w);
-    halfH=Di*0.5+ext[i]*D*(barRatio(i)-1)*0.5;
+    halfH=Di*0.5+EXT*D*(barRatio(i)-1)*0.5;
     yc=LAY.cy+w*bam;             /* προς τα κάτω: το δάχτυλο χτυπάει το τραπέζι */
     y0=yc-halfH+Di*0.5;
     /* το +0.01 κρατάει τη διαδρομή μη μηδενική: κάποιες μηχανές
@@ -346,8 +345,8 @@ function paintBars(g,lv,bright){
     y1=yc+halfH-Di*0.5+0.01;
     hot=lv*0.75+w*0.42; if(hot>1) hot=1;
     gg=(100+34*hot)|0; bb=(16+26*hot)|0;
-    a=(0.030+0.052*glowEnv+0.026*w)*bright;
-    if(a>0.45) a=0.45;
+    a=(0.030+0.050*glowEnv+0.025*w)*bright;
+    if(a>0.42) a=0.42;
     g.strokeStyle='rgba(255,'+gg+','+bb+','+a.toFixed(4)+')';
     g.lineWidth=Di*1.15;
     g.beginPath(); g.moveTo(x,y0); g.lineTo(x,y1); g.stroke();
@@ -392,9 +391,9 @@ function drawScene(t,dt,lv,br){
   var cx=CW*0.5, cy=LAY.cy;
   var hr=Math.max(LAY.pitch*(NB-1)*0.85, LAY.D*RMAX*0.6)*(1.55+0.75*glowEnv);
   var hg=g2.createRadialGradient(cx,cy,0,cx,cy,hr);
-  hg.addColorStop(0,   'rgba(255,164,72,'+((0.014+0.088*glowEnv+0.012*mixListen)*glowK).toFixed(3)+')');
-  hg.addColorStop(0.38,'rgba(255,150,52,'+((0.006+0.038*glowEnv)*glowK).toFixed(3)+')');
-  hg.addColorStop(0.70,'rgba(255,128,30,'+((0.002+0.013*glowEnv)*glowK).toFixed(3)+')');
+  hg.addColorStop(0,   'rgba(255,164,72,'+((0.014+0.086*glowEnv+0.012*mixListen)*glowK).toFixed(3)+')');
+  hg.addColorStop(0.38,'rgba(255,150,52,'+((0.006+0.036*glowEnv)*glowK).toFixed(3)+')');
+  hg.addColorStop(0.70,'rgba(255,128,30,'+((0.002+0.010*glowEnv)*glowK).toFixed(3)+')');
   hg.addColorStop(1,   'rgba(255,116,20,0)');
   g2.fillStyle=hg; g2.beginPath(); g2.arc(cx,cy,hr,0,TAU); g2.fill();
   g2.setTransform(1,0,0,1,0,0);
@@ -719,7 +718,7 @@ window.AIAS={
   /* πού βρίσκεται η κάθε τελεία αυτή τη στιγμή — για μετρήσεις σε γνωστές
      θέσεις, αντί να μαντεύει κανείς τα όρια από τα εικονοστοιχεία */
   probe:function(){ return {n:NB, D:LAY.D, x0:LAY.x0, pitch:LAY.pitch, cy:LAY.cy,
-                            ext:ext.slice(0,NB), wave:bnc.slice(0,NB)}; }
+                            ext:EXT, wave:bnc.slice(0,NB)}; }
 };
 })();
 </script>
