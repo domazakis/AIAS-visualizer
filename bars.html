@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>ΑΙΑΣ — γραμμές</title>
+<title>ΑΙΑΣ — τελείες</title>
 <style>
   :root{ --amber:#ffb63f; }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -104,10 +104,10 @@
 
 <div id="ov">
   <h1>ΑΙΑΣ</h1>
-  <h2>γραμμές</h2>
-  <p>Όταν ο Αίας μιλάει, οι γραμμές χορεύουν. Όταν περιμένει και ακούει, χτυπάνε με τη σειρά σαν δάχτυλα στο τραπέζι — πρώτο το τέρμα αριστερά.</p>
+  <h2>τελείες</h2>
+  <p>Όταν ο Αίας μιλάει, οι τελείες παχαίνουν συμμετρικά. Όταν περιμένει και ακούει, αναπηδούν με τη σειρά σαν δάχτυλα στο τραπέζι — πρώτο το τέρμα αριστερά.</p>
   <button class="btn" id="go">Έναρξη</button>
-  <p class="small">Χωρίς μικρόφωνο σε αυτή τη φάση. Με το ⚙ επάνω δεξιά αλλάζεις πόσες γραμμές, πάχος, ύψος και ρυθμό.</p>
+  <p class="small">Χωρίς μικρόφωνο σε αυτή τη φάση. Με το ⚙ επάνω δεξιά αλλάζεις πόσες τελείες, πάχος, ύψος και ρυθμό.</p>
 </div>
 
 <div id="cap">
@@ -134,15 +134,15 @@
     <button class="sb" data-st="high">Μιλάει · υψηλά</button>
   </div>
 
-  <h3>Γραμμές</h3>
+  <h3>Τελείες</h3>
   <label>Πόσες <span id="vCount">5</span>
     <input type="range" id="sCount" min="3" max="5" step="1" value="5"></label>
-  <label>Πάχος <span id="vThick">1.00×</span>
-    <input type="range" id="sThick" min="0.5" max="2" step="0.05" value="1"></label>
-  <label>Ύψος <span id="vHeight">1.00×</span>
-    <input type="range" id="sHeight" min="0.5" max="1.6" step="0.05" value="1"></label>
-  <label>Απόσταση <span id="vSpace">3.00</span>
-    <input type="range" id="sSpace" min="1.8" max="4.5" step="0.1" value="3"></label>
+  <label>Πάχος τελείας <span id="vThick">1.00×</span>
+    <input type="range" id="sThick" min="0.6" max="1.8" step="0.05" value="1"></label>
+  <label>Ύψος στην ομιλία <span id="vHeight">4.5 × Δ</span>
+    <input type="range" id="sHeight" min="1.5" max="7" step="0.1" value="4.5"></label>
+  <label>Απόσταση <span id="vSpace">2.00 × Δ</span>
+    <input type="range" id="sSpace" min="1.5" max="4" step="0.1" value="2"></label>
   <label>Ρυθμός <span id="vRate">1.00×</span>
     <input type="range" id="sRate" min="0.5" max="2" step="0.05" value="1"></label>
 
@@ -156,7 +156,7 @@
   <div class="tog"><span>Λεζάντες</span><input type="checkbox" id="tCap" checked></div>
   <button class="sb" id="again">Επανάληψη σεναρίου</button>
   <button class="sb" id="fsBtn">Πλήρης οθόνη</button>
-  <p class="note">Ο ρυθμός αφορά και τα δύο: πόσο γρήγορα χτυπάνε τα δάχτυλα στη σιωπή, και πόσο ζωηρά χορεύουν οι γραμμές στην ομιλία.</p>
+  <p class="note">Στη σιωπή και την ακρόαση οι τελείες μένουν τελείες και μόνο αναπηδούν· το μέγεθος δεν αλλάζει. Το «ύψος» μετριέται σε διαμέτρους: πόσο ψηλώνει η μεσαία όταν φτάσει στο μέγιστο.</p>
 </div>
 
 <script>
@@ -178,48 +178,60 @@ var mixListen=0, mixSpeak=0;
 var glowEnv=0;
 
 /* ==================================================================
-   2. ΜΠΑΡΕΣ.
-   Κάθε μπάρα είναι μία και μόνη γραμμή με στρογγυλό τελείωμα: το πάχος
-   της γραμμής δίνει το πλάτος, τα τελειώματα τις καμπύλες. Καμία άλλη
-   γεωμετρία δεν χρειάζεται — και όταν η μπάρα πέσει στο ελάχιστο, το
-   στρογγυλό τελείωμα την αφήνει φωτεινή κουκκίδα αντί να τη σβήσει.
+   2. ΤΕΛΕΙΕΣ.
+   Κάθε τελεία είναι μία γραμμή με στρογγυλό τελείωμα, πάχους Δ. Όταν το
+   μήκος της είναι μηδέν, το τελείωμα και μόνο ζωγραφίζει έναν τέλειο
+   κύκλο διαμέτρου Δ. Γι' αυτό η ηρεμία δίνει τελείες εξ ορισμού και όχι
+   κατά προσέγγιση:
 
-   Δύο συμπεριφορές, ανακατεμένες με το mixSpeak:
+        μισό ύψος = Δ/2 + έκταση · Δ·(αναλογία−1)/2
 
-   ΟΜΙΛΙΑ — φάσμα. Η φωνή δίνει έναν μόνο αριθμό· το φάσμα το φτιάχνουμε
-   εμείς. Κάθε μπάρα παίρνει σταθερό βάρος —μεσαία ψηλότερη, ακριανές
-   κοντύτερες— και το πολλαπλασιάζει με δικό της κυματισμό από δύο
-   ασύμμετρες συχνότητες. Έτσι δεν ανεβοκατεβαίνουν ποτέ όλες μαζί, όπως
-   δεν το κάνουν και σε πραγματικό φάσμα.
+   Με έκταση μηδέν βγαίνει Δ/2, δηλαδή μηδενικό μήκος γραμμής.
 
-   ΣΙΩΠΗ ΚΑΙ ΑΚΡΟΑΣΗ — δάχτυλα στο τραπέζι. Ένας δείκτης περνάει από
-   μπάρα σε μπάρα, από αριστερά προς τα δεξιά, και σε κάθε πέρασμα
-   χτυπάει τη μπάρα: τη σηκώνει στο ένα και την αφήνει να πέσει μόνη
-   της. Οι ουρές επικαλύπτονται, οπότε το μάτι βλέπει ένα χέρι και όχι
-   πέντε ανεξάρτητα φώτα. Μετά την τελευταία, παύση και πάλι από την
-   αρχή. Στην ακρόαση ο ρυθμός ανεβαίνει και το χτύπημα ανάβει πιο ζωηρά.
+   ΣΙΩΠΗ ΚΑΙ ΑΚΡΟΑΣΗ — αναπηδούν. Η έκταση μένει καρφωμένη στο μηδέν, το
+   μέγεθος δεν αλλάζει ούτε κατά εικονοστοιχείο· αυτό που κινείται είναι
+   η ΘΕΣΗ. Ένας δείκτης περνάει από τελεία σε τελεία, από αριστερά προς
+   τα δεξιά, και όποια πιάσει την πετάει προς τα πάνω. Πέφτει μόνη της
+   ενώ χτυπιέται η επόμενη, οπότε το μάτι βλέπει χέρι που κυλάει. Μετά
+   την τελευταία, παύση και πάλι από την αρχή.
 
-   Ο δείκτης μετριέται σε ΧΤΥΠΟΥΣ, όχι σε δευτερόλεπτα: drum += dt·ρυθμός.
-   Αν τον υπολογίζαμε ως χρόνο επί ρυθμό, κάθε αλλαγή ρυθμού —από το
-   ρυθμιστικό ή από την ακρόαση— θα τον μετακινούσε ακαριαία σε άλλη
-   μπάρα μέσα στο ίδιο καρέ. Είναι το ίδιο σφάλμα που πιάστηκε στις
-   κορδέλες.
+   ΟΜΙΛΙΑ — παχουλά και συμμετρικά. Το ύψος κάθε θέσης έχει δικό της
+   ταβάνι, μετρημένο σε διαμέτρους: η μεσαία ψηλή, οι πλαϊνές μεσαίες,
+   οι ακριανές κοντόχοντρες. Όλες εκτείνονται κατά το ίδιο ΠΟΣΟΣΤΟ του
+   δικού τους ταβανιού, οπότε η σιλουέτα κρατάει πάντα το ίδιο σχήμα και
+   απλώς μεγαλώνει με την ένταση.
+
+   Η συμμετρία δεν είναι σύμπτωση: οι τελείες που κοιτάζονται στον
+   καθρέφτη μοιράζονται την ίδια φάση κυματισμού, τη φάση της θέσης
+   min(i, N−1−i). Η πρώτη ταυτίζεται με την πέμπτη όσο κι αν τρέξει ο
+   χρόνος.
+
+   Ο δείκτης του τυμπάνου μετριέται σε ΧΤΥΠΟΥΣ, όχι σε δευτερόλεπτα:
+   drum += dt·ρυθμός. Αν τον υπολογίζαμε ως χρόνο επί ρυθμό, κάθε αλλαγή
+   ρυθμού —από το ρυθμιστικό ή από την ακρόαση— θα τον μετακινούσε
+   ακαριαία σε άλλη τελεία μέσα στο ίδιο καρέ. Είναι το ίδιο σφάλμα που
+   πιάστηκε στις κορδέλες.
    ================================================================== */
 var MAXB=5, NB=5;
-var hgt=[], strk=[], ph1=[], ph2=[];
-for(var k=0;k<MAXB;k++){ hgt.push(0.07); strk.push(0); ph1.push(k*1.73); ph2.push(k*2.91); }
+var ext=[], bnc=[], strk=[], ph1=[], ph2=[];
+for(var k=0;k<MAXB;k++){ ext.push(0); bnc.push(0); strk.push(0); ph1.push(k*1.73); ph2.push(k*2.91); }
 
 var drum=0, lastK=-1, tGlob=0;
 var REST=1.8;                    /* παύση μετά την τελευταία, σε χτύπους */
-var THICK=1, HEIGHT=1, SPACING=3.0, RATE=1;
+var THICK=1, RMAX=4.5, SPACING=2.0, RATE=1;
+var BAMP=0.85;                   /* ύψος άλματος, σε διαμέτρους */
 function wrap(a){ a%=TAU; return a<0?a+TAU:a; }
 
-/* το βάρος κάθε μπάρας: ένα στη μέση, 0.42 στις άκρες */
+/* Το βάρος κάθε θέσης. Στη μέση βγάζει ακριβώς 1, στα μισά ακριβώς 0.65,
+   στις άκρες ακριβώς 0.30 — τα νούμερα δεν είναι ρυθμισμένα με το χέρι,
+   πέφτουν από τον τύπο, γιατί συν(π/4)² = 1/2. */
 function barW(i,n){
   if(n<2) return 1;
-  var u=(i-(n-1)/2)/((n-1)/2);
-  return 0.42+0.58*Math.pow(Math.cos(u*Math.PI*0.5),1.4);
+  var u=(i-(n-1)/2)/((n-1)/2), c=Math.cos(u*Math.PI*0.5);
+  return 0.30+0.70*c*c;
 }
+/* πόσες διαμέτρους ψηλώνει η θέση i όταν φτάσει στο μέγιστο */
+function barRatio(i){ return 1+(RMAX-1)*barW(i,NB); }
 
 /* ---------- καμβάδες: σκηνή στον ορατό, λάμψη στο ένα τέταρτο ---------- */
 var BL=[], BC=[];
@@ -253,10 +265,10 @@ var TRAILFADE=0.65, TRAILK=TRAILFADE;
 function setSoft(){ var v=parseFloat($('sSoft').value);
   TRAILFADE=(0.95-0.72*v)*(1-0.12*glowEnv); TRAILK=TRAILFADE; }
 
-/* ---------- τα ύψη: μία φορά ανά καρέ, κοινά για τους δύο καμβάδες ---------- */
+/* ---------- μία φορά ανά καρέ, κοινά για τους δύο καμβάδες ---------- */
 function stepBars(dt,lv,br){
   var i,q;
-  /* ο δείκτης του τυμπάνου */
+  /* ο δείκτης του τυμπάνου, σε χτύπους */
   var rate=(2.6*RATE)*(1+0.45*mixListen)*(reduce?0.6:1);
   var cyc=NB+REST;
   drum+=dt*rate;
@@ -264,7 +276,7 @@ function stepBars(dt,lv,br){
   var kk=Math.floor(drum);
   if(kk<NB){
     if(kk!==lastK){
-      /* αν ένα αργό καρέ πήδηξε μπάρα, χτυπιούνται και οι ενδιάμεσες */
+      /* αν ένα αργό καρέ πήδηξε τελεία, χτυπιούνται και οι ενδιάμεσες */
       var s0=(lastK<0||lastK>=kk)?kk:lastK+1;
       for(q=s0;q<=kk;q++) strk[q]=1;
       lastK=kk;
@@ -273,56 +285,68 @@ function stepBars(dt,lv,br){
   var dec=Math.pow(0.010,dt);
   for(i=0;i<MAXB;i++) strk[i]*=dec;
 
-  /* ο ρυθμός του φάσματος επιταχύνει με την ένταση */
+  /* Οι φάσεις προχωράνε ΜΙΑ φορά η καθεμιά, όχι μία ανά τελεία που τις
+     δανείζεται. Είναι λιγότερες από τις τελείες: τρεις για πέντε. */
   var sr=(0.85+2.10*lv)*RATE*(reduce?0.6:1);
-  var amp=0.34+0.14*mixListen;
-  var kUp=1-Math.exp(-dt/0.035), kDn=1-Math.exp(-dt/0.115);
-  for(i=0;i<NB;i++){
+  var nph=(NB>>1)+1;
+  for(i=0;i<nph;i++){
     ph1[i]=wrap(ph1[i]+dt*(1.55+0.42*i)*sr);
     ph2[i]=wrap(ph2[i]+dt*(2.60+0.67*i)*sr);
-    var wob=0.58+0.42*(0.62*Math.sin(ph1[i])+0.38*Math.sin(ph2[i]));
-    var W=barW(i,NB);
-    var sp=0.12+(lv*1.55*wob+0.22*br)*W;  if(sp>1) sp=1;
-    var dr=0.075+0.016*Math.sin(tGlob*0.8+i*1.1)+strk[i]*amp;
-    var tg=dr+(sp-dr)*mixSpeak;
-    hgt[i]+=(tg-hgt[i])*(tg>hgt[i]?kUp:kDn);
+  }
+
+  var kUp=1-Math.exp(-dt/0.035), kDn=1-Math.exp(-dt/0.115), kFall=1-Math.exp(-dt/0.085);
+  for(i=0;i<NB;i++){
+    var m=(i<NB-1-i)?i:NB-1-i;             /* ο καθρέφτης */
+    var wob=0.58+0.42*(0.62*Math.sin(ph1[m])+0.38*Math.sin(ph2[m]));
+    /* έκταση: μόνο στην ομιλία. Στη σιωπή σβήνει και μένει ο κύκλος. */
+    var sp=0.14+lv*1.35*wob+0.20*br; if(sp>1) sp=1; if(sp<0) sp=0;
+    var tg=sp*mixSpeak;
+    ext[i]+=(tg-ext[i])*(tg>ext[i]?kUp:kDn);
+    /* άλμα: μόνο θέση, ποτέ μέγεθος, και μόνο όσο δεν μιλάει */
+    var tb=strk[i]*(1-mixSpeak);
+    bnc[i]+=(tb-bnc[i])*(tb>bnc[i]?kUp:kFall);
   }
 }
 
 /* ---------- η σχεδίαση, ίδια σε ορατό καμβά και σε καμβά λάμψης ----------
-   Πέντε μπάρες, δύο πινελιές η καθεμιά: μια φαρδιά και αχνή για το
-   περίβλημα του φωτός, και ο πυρήνας από πάνω. Δέκα πινελιές το καρέ —
-   δεν χρειάζεται καμία ομαδοποίηση.                                    */
-var LAY={x0:0, pitch:0, w:8, maxH:100, cy:0};
+   Δύο πινελιές ανά τελεία: μια φαρδιά και αχνή για το περίβλημα του
+   φωτός, και ο πυρήνας από πάνω. Δέκα πινελιές το καρέ.               */
+var LAY={x0:0, pitch:0, D:8, cy:0};
 function layout(){
-  var w=Math.min(CW,CH2)*0.030*THICK;
-  var pitch=w*SPACING;
-  var span=pitch*(NB-1)+w;
-  if(span>CW*0.86){ var s=CW*0.86/span; w*=s; pitch*=s; span*=s; }
-  LAY.w=w; LAY.pitch=pitch;
+  var D=Math.min(CW,CH2)*0.058*THICK;
+  var pitch=D*SPACING, s;
+  /* να χωράει και κατά πλάτος και στο μέγιστο ύψος της μεσαίας */
+  var span=pitch*(NB-1)+D;
+  if(span>CW*0.86){ s=CW*0.86/span; D*=s; pitch*=s; }
+  var tall=D*RMAX;
+  if(tall>CH2*0.72){ s=CH2*0.72/tall; D*=s; pitch*=s; }
+  LAY.D=D; LAY.pitch=pitch;
   LAY.x0=CW*0.5-(pitch*(NB-1))*0.5;
-  LAY.maxH=Math.min(CH2*0.30*HEIGHT, CH2*0.44);
   LAY.cy=CH2*0.5;
 }
 function paintBars(g,lv,bright){
-  var i,x,half,y0,y1,hot,gg,bb,a;
+  var i,x,yc,halfH,y0,y1,hot,gg,bb,a, D=LAY.D, bam=BAMP*D;
   g.lineCap='round';
   for(i=0;i<NB;i++){
     x=LAY.x0+LAY.pitch*i;
-    half=hgt[i]*LAY.maxH; if(half<LAY.w*0.5) half=LAY.w*0.5;
-    y0=LAY.cy-half+LAY.w*0.5; y1=LAY.cy+half-LAY.w*0.5;
-    if(y1<y0){ y0=y1=LAY.cy; }
-    /* το χτύπημα ανάβει τη μπάρα τη στιγμή που την πιάνει το δάχτυλο */
-    hot=lv*0.80+strk[i]*0.55*(1-mixSpeak); if(hot>1) hot=1;
-    gg=(140+72*hot)|0; bb=(46+82*hot)|0;
-    a=(0.052+0.070*glowEnv+0.045*strk[i]*(1-mixSpeak))*bright;
-    if(a>0.6) a=0.6;
+    halfH=D*0.5+ext[i]*D*(barRatio(i)-1)*0.5;
+    yc=LAY.cy-bnc[i]*bam;
+    y0=yc-halfH+D*0.5;
+    /* το +0.01 κρατάει τη διαδρομή μη μηδενική: κάποιες μηχανές
+       παραλείπουν εντελώς μια γραμμή μηδενικού μήκους, και τότε η
+       τελεία θα εξαφανιζόταν αντί να ζωγραφιστεί από το τελείωμα */
+    y1=yc+halfH-D*0.5+0.01;
+    /* το άλμα ανάβει την τελεία τη στιγμή που τη χτυπάει το δάχτυλο */
+    hot=lv*0.75+bnc[i]*0.50*(1-mixSpeak); if(hot>1) hot=1;
+    gg=(104+50*hot)|0; bb=(18+42*hot)|0;
+    a=(0.030+0.052*glowEnv+0.030*bnc[i]*(1-mixSpeak))*bright;
+    if(a>0.45) a=0.45;
     g.strokeStyle='rgba(255,'+gg+','+bb+','+a.toFixed(4)+')';
-    g.lineWidth=LAY.w*2.4;
+    g.lineWidth=D*1.8;
     g.beginPath(); g.moveTo(x,y0); g.lineTo(x,y1); g.stroke();
-    a=(0.70+0.22*hot)*bright; if(a>1) a=1;
-    g.strokeStyle='rgba(255,'+Math.min(255,gg+20)+','+Math.min(255,bb+24)+','+a.toFixed(4)+')';
-    g.lineWidth=LAY.w;
+    a=(0.62+0.20*hot)*bright; if(a>1) a=1;
+    g.strokeStyle='rgba(255,'+Math.min(255,gg+12)+','+Math.min(255,bb+10)+','+a.toFixed(4)+')';
+    g.lineWidth=D;
     g.beginPath(); g.moveTo(x,y0); g.lineTo(x,y1); g.stroke();
   }
 }
@@ -331,7 +355,7 @@ function drawScene(t,dt,lv,br){
   var glowK=parseFloat($('sGlow').value);
   NB    =Math.max(2,Math.min(MAXB, parseInt($('sCount').value,10)||5));
   THICK =parseFloat($('sThick').value);
-  HEIGHT=parseFloat($('sHeight').value);
+  RMAX  =parseFloat($('sHeight').value);
   SPACING=parseFloat($('sSpace').value);
   RATE  =parseFloat($('sRate').value);
   setSoft();
@@ -359,11 +383,11 @@ function drawScene(t,dt,lv,br){
 
   /* η λάμψη της ομάδας: φουσκώνει όσο μιλάει */
   var cx=CW*0.5, cy=LAY.cy;
-  var hr=Math.max(LAY.pitch*(NB-1)*0.85, LAY.maxH)*(1.55+0.75*glowEnv);
+  var hr=Math.max(LAY.pitch*(NB-1)*0.85, LAY.D*RMAX*0.6)*(1.55+0.75*glowEnv);
   var hg=g2.createRadialGradient(cx,cy,0,cx,cy,hr);
-  hg.addColorStop(0,   'rgba(255,186,104,'+((0.016+0.098*glowEnv+0.014*mixListen)*glowK).toFixed(3)+')');
-  hg.addColorStop(0.38,'rgba(255,150,52,'+((0.007+0.042*glowEnv)*glowK).toFixed(3)+')');
-  hg.addColorStop(0.70,'rgba(255,128,30,'+((0.002+0.014*glowEnv)*glowK).toFixed(3)+')');
+  hg.addColorStop(0,   'rgba(255,164,72,'+((0.014+0.088*glowEnv+0.012*mixListen)*glowK).toFixed(3)+')');
+  hg.addColorStop(0.38,'rgba(255,150,52,'+((0.006+0.038*glowEnv)*glowK).toFixed(3)+')');
+  hg.addColorStop(0.70,'rgba(255,128,30,'+((0.002+0.013*glowEnv)*glowK).toFixed(3)+')');
   hg.addColorStop(1,   'rgba(255,116,20,0)');
   g2.fillStyle=hg; g2.beginPath(); g2.arc(cx,cy,hr,0,TAU); g2.fill();
   g2.setTransform(1,0,0,1,0,0);
@@ -385,12 +409,11 @@ function composite(lv){
   BC[3].globalAlpha=0.95; BC[3].drawImage(BL[2], 0,0, w3,h3);
   BC[3].globalAlpha=1;
   ctx.globalCompositeOperation='lighter';
-  ctx.globalAlpha=Math.min(1,(0.80+0.32*glowEnv)*glowK);
+  ctx.globalAlpha=Math.min(1,(0.60+0.28*glowEnv)*glowK);
   ctx.drawImage(BL[3],0,0,CW,CH2);
   ctx.globalAlpha=1;
   ctx.globalCompositeOperation='source-over';
 }
-
 /* ==================================================================
    3. ΠΕΡΙΓΡΑΜΜΑ ΦΩΝΗΣ — συνθετικό, από το ίδιο το κείμενο.
    Κάθε συλλαβή = ένα «χτύπημα» με γρήγορη άνοδο και ομαλή πτώση.
@@ -621,8 +644,8 @@ $('tCap').addEventListener('change',function(){ $('cap').classList.toggle('off',
 function showVals(){
   $('vCount').textContent =$('sCount').value;
   $('vThick').textContent =parseFloat($('sThick').value).toFixed(2)+'×';
-  $('vHeight').textContent=parseFloat($('sHeight').value).toFixed(2)+'×';
-  $('vSpace').textContent =parseFloat($('sSpace').value).toFixed(2);
+  $('vHeight').textContent=parseFloat($('sHeight').value).toFixed(1)+' × Δ';
+  $('vSpace').textContent =parseFloat($('sSpace').value).toFixed(2)+' × Δ';
   $('vRate').textContent  =parseFloat($('sRate').value).toFixed(2)+'×';
   $('vSoft').textContent  =parseFloat($('sSoft').value).toFixed(2);
 }
