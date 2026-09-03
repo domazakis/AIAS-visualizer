@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ΑΙΑΣ">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -91,6 +94,7 @@
   .row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
   .sb{
+    display:block;text-align:center;text-decoration:none;
     border:1px solid rgba(255,150,50,.24);background:transparent;color:#c8b49a;
     font-size:12px;padding:9px 4px;border-radius:9px;cursor:pointer;font-family:inherit;
   }
@@ -162,6 +166,7 @@
   <div class="tog"><span>Λεζάντες</span><input type="checkbox" id="tCap" checked></div>
   <button class="sb" id="again">Επανάληψη σεναρίου</button>
   <button class="sb" id="fsBtn">Πλήρης οθόνη</button>
+  <a class="sb" href="index.html">← Μενού</a>
   <p class="note">Η απαλότητα ρυθμίζει πόση φωτεινή ουρά αφήνει η κίνηση. Η δοκιμή δεν χρησιμοποιεί μικρόφωνο. Η κίνηση παράγεται από συνθετικό «περίγραμμα φωνής» — την ίδια είσοδο που αργότερα θα δίνει ο agent του ElevenLabs και το μικρόφωνο.</p>
 </div>
 
