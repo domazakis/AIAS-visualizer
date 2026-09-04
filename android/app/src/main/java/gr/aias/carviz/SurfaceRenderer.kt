@@ -13,19 +13,28 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 
 /**
- * Η δοκιμή του βήματος 1: ζωγραφίζει μια γραμμή που σαρώνει κατακόρυφα και
- * τυπώνει τις διαστάσεις της επιφάνειας, την ορατή περιοχή και τα καρέ ανά
- * δευτερόλεπτο.
+ * Ο βρόχος σχεδίασης στην επιφάνεια που παραχωρεί ο host.
  *
- * Δεν έχει καμία σχέση με τη σφαίρα. Απαντά σε μία μόνο ερώτηση: παίρνει η
- * εφαρμογή μας επιφάνεια στην οθόνη του αυτοκινήτου και τη ζωγραφίζει;
+ * Το βήμα 1 —«παίρνουμε επιφάνεια;»— απαντήθηκε καταφατικά στο πραγματικό
+ * αυτοκίνητο: 1785×690 στα 240 dpi, 46 καρέ. Εδώ πλέον ζωγραφίζονται οι
+ * τελείες του βήματος 2, μεταφερμένες από το `bars.html`.
  *
- * Οι τρεις αριθμοί που θα δείξει είναι ακριβώς όσοι χρειάζονται για να
- * ρυθμιστεί ο πραγματικός renderer στο βήμα 2.
+ * Τα διαγνωστικά μένουν: στο ενσύρματο Android Auto το καλώδιο πιάνει τη θύρα
+ * του κινητού, οπότε δεν υπάρχει adb τη στιγμή της δοκιμής.
  */
 class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObserver {
 
-    companion object { private const val TAG = "AiasSurface" }
+    companion object {
+        private const val TAG = "AiasSurface"
+
+        /**
+         * Οι αριθμοί πάνω στην οθόνη του αυτοκινήτου. Κλειστοί: η εικόνα είναι
+         * το ζητούμενο, και τα ίδια νούμερα γράφονται ούτως ή άλλως στα
+         * διαγνωστικά που διαβάζονται από το κινητό. Άνοιξέ το αν χρειαστεί να
+         * δεις κάτι επιτόπου.
+         */
+        private const val SHOW_HUD = false
+    }
 
     private var container: SurfaceContainer? = null
     private var thread: Thread? = null
@@ -33,17 +42,26 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
 
     /**
      * Η περιοχή που δεν σκεπάζεται από τα δικά του στοιχεία το head unit.
-     * Η επιφάνεια που μας δίνεται μπορεί να είναι μεγαλύτερη από ό,τι
-     * φαίνεται πραγματικά, οπότε η σφαίρα πρέπει να κεντραριστεί εδώ μέσα
-     * και όχι στο σύνολο. Γι' αυτό τη ζωγραφίζουμε ήδη από τη δοκιμή.
+     * Η **σταθερή** είναι η εγγυημένη· η ορατή μεγαλώνει όταν κρύβεται η μπάρα
+     * του Android Auto (στο MG από 540 σε 636 σε ύψος) και η σύνθεση θα
+     * πηδούσε αν κεντραριζόταν εκεί.
      */
     @Volatile private var visible: Rect? = null
     @Volatile private var stable: Rect? = null
+
+    private val bars = Bars()
+    private val demo = Demo()
 
     /** Διαβάζεται από την οθόνη διαγνωστικών στο κινητό. */
     @Volatile
     var status: String = "δεν έχει δοθεί επιφάνεια ακόμη"
         private set
+
+    private val hud = Paint().apply {
+        isAntiAlias = true
+        color = Color.rgb(255, 205, 140)
+        textSize = 38f
+    }
 
     /**
      * Κάθε τι που μαθαίνουμε γράφεται και μόνιμα, γιατί στο αυτοκίνητο δεν
@@ -53,24 +71,6 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
         try { Diag.put(carContext, key, value) } catch (e: Throwable) {
             Log.w(TAG, "αποτυχία εγγραφής διαγνωστικών", e)
         }
-    }
-
-    private val bg = Paint().apply { color = Color.BLACK }
-    private val stroke = Paint().apply {
-        isAntiAlias = true
-        color = Color.rgb(255, 170, 60)
-        strokeWidth = 5f
-    }
-    private val frame = Paint().apply {
-        isAntiAlias = true
-        style = Paint.Style.STROKE
-        color = Color.rgb(120, 80, 30)
-        strokeWidth = 2f
-    }
-    private val label = Paint().apply {
-        isAntiAlias = true
-        color = Color.rgb(255, 205, 140)
-        textSize = 38f
     }
 
     /**
@@ -85,8 +85,6 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
             status = "επιφάνεια ${surfaceContainer.width}×${surfaceContainer.height}, " +
                      "${surfaceContainer.dpi} dpi"
             Log.i(TAG, "onSurfaceAvailable: $status")
-            // Αυτή η μία γραμμή είναι η απάντηση στο ερώτημα του βήματος 1:
-            // ο host μας παραχώρησε επιφάνεια.
             note("κατάσταση", "ΝΑΙ — ο host έδωσε επιφάνεια")
             note("επιφάνεια", "${surfaceContainer.width} × ${surfaceContainer.height}, " +
                               "${surfaceContainer.dpi} dpi")
@@ -126,7 +124,12 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
 
     override fun onDestroy(owner: LifecycleOwner) {
         stop()
+        bars.release()
     }
+
+    /** Η περιοχή μέσα στην οποία κεντράρεται η σύνθεση. */
+    private fun box(w: Int, h: Int): Rect =
+        stable ?: visible ?: Rect(0, 0, w, h)
 
     private fun start() {
         if (running) return
@@ -135,27 +138,51 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
             var frames = 0
             var total = 0L
             var mark = System.nanoTime()
+            var prev = mark
             var fps = 0.0
-            var phase = 0f
             var reported = false
+            var lockFails = 0
             while (running) {
                 val c = container
                 val surface = c?.surface
+                val now = System.nanoTime()
+                // Πραγματικό dt: οι φάσεις ολοκληρώνονται στον χρόνο, οπότε ένα
+                // σταθερό 16 ms θα παραμόρφωνε την κίνηση σε κάθε πτώση καρέ.
+                var dt = (now - prev) / 1e9f
+                prev = now
+                if (dt > 0.05f) dt = 0.05f
+                if (dt <= 0f) dt = 0.016f
+
                 if (surface != null && surface.isValid) {
                     var canvas: Canvas? = null
                     try {
+                        // Το lockCanvas αποτυγχάνει αν την επιφάνεια την κρατάει
+                        // ακόμη άλλος παραγωγός — συμβαίνει όταν η εφαρμογή
+                        // αντικατασταθεί ενώ τρέχει και η παλιά διεργασία δεν
+                        // έχει αποσυνδεθεί. Δεν είναι δικό μας σφάλμα σχεδίασης
+                        // και δεν έχει νόημα να επιμένουμε ενενήντα φορές το
+                        // δευτερόλεπτο.
                         canvas = surface.lockCanvas(null)
-                        phase += 0.010f
-                        if (phase > 1f) phase -= 1f
-                        draw(canvas, c.width, c.height, phase, fps)
+                        lockFails = 0
+                        demo.step(dt, bars)
+                        bars.frame(canvas, dt, c.width, c.height, box(c.width, c.height))
+                        if (SHOW_HUD) hud(canvas, c.width, c.height, fps)
                         total++
                     } catch (e: Throwable) {
-                        Log.w(TAG, "αποτυχία σχεδίασης", e)
-                        // Μόνο το πρώτο σφάλμα· αλλιώς γράφουμε στον δίσκο
-                        // εξήντα φορές το δευτερόλεπτο.
-                        if (!reported) {
-                            reported = true
-                            note("σφάλμα", "στη σχεδίαση: $e")
+                        if (canvas == null) {
+                            lockFails++
+                            if (lockFails == 1) {
+                                Log.w(TAG, "η επιφάνεια δεν κλειδώνει", e)
+                                note("σφάλμα", "η επιφάνεια δεν κλειδώνει: $e")
+                            }
+                        } else {
+                            Log.w(TAG, "αποτυχία σχεδίασης", e)
+                            // Μόνο το πρώτο σφάλμα· αλλιώς γράφουμε στον δίσκο
+                            // εξήντα φορές το δευτερόλεπτο.
+                            if (!reported) {
+                                reported = true
+                                note("σφάλμα", "στη σχεδίαση: $e")
+                            }
                         }
                     } finally {
                         if (canvas != null) {
@@ -164,7 +191,6 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
                     }
                 }
                 frames++
-                val now = System.nanoTime()
                 if (now - mark > 1_000_000_000L) {
                     fps = frames * 1e9 / (now - mark)
                     frames = 0
@@ -172,8 +198,12 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
                     // Το σύνολο των καρέ είναι η απόδειξη ότι πράγματι
                     // ζωγραφίστηκε κάτι, όχι μόνο ότι δόθηκε επιφάνεια.
                     note("καρέ", "${"%.0f".format(fps)} fps, σύνολο $total")
+                    note("σκηνή", demo.label())
                 }
-                try { Thread.sleep(16) } catch (e: InterruptedException) { break }
+                // Οπισθοχώρηση όταν η επιφάνεια δεν κλειδώνει: δεν κερδίζουμε
+                // τίποτα επιμένοντας, και καίμε επεξεργαστή στο αυτοκίνητο.
+                val nap = if (lockFails > 3) 250L else 8L
+                try { Thread.sleep(nap) } catch (e: InterruptedException) { break }
             }
         }.also {
             it.name = "aias-render"
@@ -191,21 +221,9 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
         thread = null
     }
 
-    private fun draw(canvas: Canvas, w: Int, h: Int, phase: Float, fps: Double) {
-        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bg)
-
-        // Η σαρωτική γραμμή: αν κινείται, η επιφάνεια ζει.
-        val y = phase * h
-        canvas.drawLine(0f, y, w.toFloat(), y, stroke)
-
-        // Το περίγραμμα της ορατής περιοχής, για να φανεί πόσο από την
-        // επιφάνεια σκεπάζει το head unit με τα δικά του στοιχεία.
-        visible?.let { canvas.drawRect(it, frame) }
-
-        val vis = visible?.let { "${it.width()}×${it.height()} @ ${it.left},${it.top}" } ?: "άγνωστη"
-        canvas.drawText("ΑΙΑΣ — δοκιμή επιφάνειας", 44f, 70f, label)
-        canvas.drawText("επιφάνεια  ${w} × ${h}", 44f, 120f, label)
-        canvas.drawText("ορατή      $vis", 44f, 168f, label)
-        canvas.drawText("καρέ       ${"%.0f".format(fps)} fps", 44f, 216f, label)
+    private fun hud(canvas: Canvas, w: Int, h: Int, fps: Double) {
+        val b = box(w, h)
+        canvas.drawText("${w} × ${h}", b.left + 24f, b.top + 44f, hud)
+        canvas.drawText("${"%.0f".format(fps)} fps · ${demo.label()}", b.left + 24f, b.top + 90f, hud)
     }
 }
