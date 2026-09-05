@@ -121,6 +121,8 @@ class Bars {
         isFilterBitmap = true
         xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC)
     }
+    /** Χωρίς xfermode: η γρήγορη διαδρομή της Skia. Δες το στάδιο 4. */
+    private val overBitmap = Paint().apply { isFilterBitmap = true }
     private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
     }
@@ -276,21 +278,35 @@ class Bars {
      * Ένα καρέ. Το [box] είναι η σταθερή περιοχή· ο [canvas] ολόκληρη η
      * επιφάνεια που παραχώρησε ο host.
      */
+    /** Χρονομέτρηση σταδίων, μόνο για τη μέτρηση. Σε νανοδευτερόλεπτα. */
+    @Volatile var profile = false
+    val stage = LongArray(5)     // καθάρισμα, πινελιές, λάμψη, πυραμίδα, επίστρωση
+    fun resetStages() { for (i in stage.indices) stage[i] = 0 }
+    private inline fun timed(i: Int, body: () -> Unit) {
+        if (!profile) { body(); return }
+        val t0 = System.nanoTime(); body(); stage[i] += System.nanoTime() - t0
+    }
+
     fun frame(canvas: Canvas, dt: Float, w: Int, h: Int, box: Rect) {
+        if (w <= 0 || h <= 0 || box.width() <= 0 || box.height() <= 0) return
         ensureCanvases(w, h)
         stepState(dt)
         stepBars(dt, smoothed, burst)
         layout(box)
+        // Δεύτερη γραμμή άμυνας: αν για οποιονδήποτε λόγο η διάταξη βγει
+        // εκφυλισμένη, δεν ζωγραφίζουμε παρά να σκάσουμε στην ακτίνα.
+        if (lD <= 0f) return
 
         val bright = (0.55f + 0.42f * glowEnv + 0.20f * mixListen + 0.12f * burst) * GLOW_K
         val trailFade = (0.95f - 0.72f * SOFT) * (1f - 0.12f * glowEnv)
 
-        // 1. ορατός καμβάς — αδιαφανές μαύρο, μετά οι τελείες προσθετικά
-        canvas.drawColor(Color.BLACK, PorterDuff.Mode.SRC)
-        paintBars(canvas, smoothed, bright)
+        // 1. ορατός καμβάς — αδιαφανές μαύρο. Οι τελείες μπαίνουν ΤΕΛΕΥΤΑΙΕΣ,
+        //    μετά τη λάμψη· ο λόγος είναι στο στάδιο 4.
+        timed(0) { canvas.drawColor(Color.BLACK, PorterDuff.Mode.SRC) }
 
         // 2. καμβάς λάμψης στο ένα τέταρτο, με ουρά
         val g2 = bc[0]!!
+        val t2 = if (profile) System.nanoTime() else 0L
         g2.drawColor(Color.argb((trailFade * 255).toInt(), 0, 0, 0), PorterDuff.Mode.SRC_OVER)
         val save = g2.save()
         g2.scale(bk, bk)
@@ -312,22 +328,41 @@ class Bars {
         )
         g2.drawCircle(cx, lCy, hr, halo)
         g2.restoreToCount(save)
+        if (profile) stage[2] += System.nanoTime() - t2
 
         // 3. η πυραμίδα: δύο ακόμη σμικρύνσεις για πλατύτερο θόλωμα.
         //    Η σύνθεση γίνεται σε ΞΕΧΩΡΙΣΤΟ καμβά — αν την ξαναγράφαμε πάνω
         //    στον συσσωρευτή, το φως θα τροφοδοτούσε τον εαυτό του και θα
         //    έφτανε στο λευκό.
-        drawScaled(bc[1]!!, bl[0]!!, bl[1]!!, srcBitmap, 255)
-        drawScaled(bc[2]!!, bl[1]!!, bl[2]!!, srcBitmap, 255)
-        drawScaled(bc[3]!!, bl[0]!!, bl[3]!!, srcBitmap, 255)
-        drawScaled(bc[3]!!, bl[1]!!, bl[3]!!, addBitmap, 230)
-        drawScaled(bc[3]!!, bl[2]!!, bl[3]!!, addBitmap, 242)
+        timed(3) {
+            drawScaled(bc[1]!!, bl[0]!!, bl[1]!!, srcBitmap, 255)
+            drawScaled(bc[2]!!, bl[1]!!, bl[2]!!, srcBitmap, 255)
+            drawScaled(bc[3]!!, bl[0]!!, bl[3]!!, srcBitmap, 255)
+            drawScaled(bc[3]!!, bl[1]!!, bl[3]!!, addBitmap, 230)
+            drawScaled(bc[3]!!, bl[2]!!, bl[3]!!, addBitmap, 242)
+        }
 
-        // 4. επίστρωση στον ορατό καμβά
-        val a = min(1f, (0.42f + 0.17f * glowEnv) * GLOW_K)
-        addBitmap.alpha = (a * 255).toInt()
-        canvas.drawBitmap(bl[3]!!, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), addBitmap)
-        addBitmap.alpha = 255
+        // 4. επίστρωση στον ορατό καμβά — και μετά οι τελείες από πάνω.
+        //
+        //    Η σειρά έχει σημασία, και είναι η μοναδική σοβαρή απόκλιση από το
+        //    πρωτότυπο. Εκεί η λάμψη προστίθεται ΠΑΝΩ στις τελείες. Εδώ
+        //    ζωγραφίζεται ΠΡΙΝ, με απλή επικάλυψη αντί για προσθετική.
+        //
+        //    Το αποτέλεσμα είναι πανομοιότυπο: πάνω σε μαύρο, η επικάλυψη με
+        //    άλφα α δίνει χρώμα·α, ακριβώς όσο και η πρόσθεση. Και επειδή η
+        //    πρόσθεση είναι αντιμεταθετική, «λάμψη μετά τελείες» ισούται με
+        //    «τελείες μετά λάμψη».
+        //
+        //    Το κέρδος δεν είναι μικρό. Μετρημένο στο κινητό, μεγέθυνση
+        //    446×172 → 1785×690: προσθετικά 15,21 ms, απλά 7,73 ms. Δηλαδή
+        //    το ένα τρίτο ολόκληρου του καρέ, δωρεάν.
+        timed(4) {
+            val a = min(1f, (0.42f + 0.17f * glowEnv) * GLOW_K)
+            overBitmap.alpha = (a * 255).toInt()
+            canvas.drawBitmap(bl[3]!!, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), overBitmap)
+            overBitmap.alpha = 255
+        }
+        timed(1) { paintBars(canvas, smoothed, bright) }
     }
 
     private fun drawScaled(dst: Canvas, src: Bitmap, into: Bitmap, paint: Paint, alpha: Int) {

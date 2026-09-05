@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
@@ -11,8 +11,8 @@ android {
         applicationId = "gr.aias.carviz"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3-bars"
+        versionCode = 4
+        versionName = "0.4-bars-fast"
     }
 
     buildTypes {

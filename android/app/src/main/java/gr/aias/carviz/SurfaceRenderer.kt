@@ -127,9 +127,20 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
         bars.release()
     }
 
-    /** Η περιοχή μέσα στην οποία κεντράρεται η σύνθεση. */
-    private fun box(w: Int, h: Int): Rect =
-        stable ?: visible ?: Rect(0, 0, w, h)
+    /**
+     * Η περιοχή μέσα στην οποία κεντράρεται η σύνθεση.
+     *
+     * Οι εκφυλισμένες απορρίπτονται: στο MG, στη μετάβαση προς τη χωρισμένη
+     * οθόνη, ήρθε στιγμιαία περιοχή μηδενικού μεγέθους. Η διάμετρος βγήκε
+     * μηδέν, και μαζί της η ακτίνα της λάμψης — «ending radius must be > 0».
+     */
+    private fun box(w: Int, h: Int): Rect {
+        val s = stable
+        if (s != null && s.width() > 0 && s.height() > 0) return s
+        val v = visible
+        if (v != null && v.width() > 0 && v.height() > 0) return v
+        return Rect(0, 0, w, h)
+    }
 
     private fun start() {
         if (running) return

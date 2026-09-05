@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tv: TextView
+    private var preview: android.widget.LinearLayout? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -23,12 +24,47 @@ class MainActivity : AppCompatActivity() {
             setPadding(56, 72, 56, 56)
             textSize = 16f
         }
-        setContentView(ScrollView(this).apply { addView(tv) })
+        // Οι προεπισκοπήσεις της μέτρησης μπαίνουν από κάτω· στην κανονική
+        // χρήση μένει άδειο και δεν φαίνεται.
+        val pv = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(56, 0, 56, 56)
+        }
+        preview = pv
+        val col = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(tv)
+            addView(pv)
+        }
+        setContentView(ScrollView(this).apply { addView(col) })
     }
 
     /** Ξαναδιαβάζονται σε κάθε εμφάνιση, ώστε να αρκεί ένα βγες-μπες. */
     override fun onResume() {
         super.onResume()
+        if (intent?.getBooleanExtra("bench", false) == true) {
+            tv.text = "Μέτρηση σε εξέλιξη…"
+            // Εκτός του νήματος διεπαφής: κρατάει μερικά δευτερόλεπτα.
+            Thread {
+                val out = Bench.runAll()
+                val full = Bench.preview(false)
+                val split = Bench.preview(true)
+                runOnUiThread {
+                    tv.text = out
+                    preview?.let { p ->
+                        p.removeAllViews()
+                        for (b in listOf(full, split)) {
+                            p.addView(android.widget.ImageView(this).apply {
+                                setImageBitmap(b)
+                                adjustViewBounds = true
+                                setPadding(0, 24, 0, 0)
+                            })
+                        }
+                    }
+                }
+            }.start()
+            return
+        }
         tv.text = report() + "\n\n" + INSTRUCTIONS
     }
 
