@@ -175,7 +175,14 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
                         // δευτερόλεπτο.
                         canvas = surface.lockCanvas(null)
                         lockFails = 0
-                        demo.step(dt, bars)
+                        // Αληθινή φωνή αν τρέχει η υπηρεσία· αλλιώς ο συνθετικός
+                        // οδηγός, ώστε να φαίνεται πάντα κάτι στην οθόνη.
+                        if (Voice.active) {
+                            bars.level = Voice.level
+                            bars.mode = Voice.mode
+                        } else {
+                            demo.step(dt, bars)
+                        }
                         bars.frame(canvas, dt, c.width, c.height, box(c.width, c.height))
                         if (SHOW_HUD) hud(canvas, c.width, c.height, fps)
                         total++
@@ -209,7 +216,7 @@ class SurfaceRenderer(private val carContext: CarContext) : DefaultLifecycleObse
                     // Το σύνολο των καρέ είναι η απόδειξη ότι πράγματι
                     // ζωγραφίστηκε κάτι, όχι μόνο ότι δόθηκε επιφάνεια.
                     note("καρέ", "${"%.0f".format(fps)} fps, σύνολο $total")
-                    note("σκηνή", demo.label())
+                    note("σκηνή", if (Voice.active) "φωνή · ${Voice.mode}" else demo.label())
                 }
                 // Οπισθοχώρηση όταν η επιφάνεια δεν κλειδώνει: δεν κερδίζουμε
                 // τίποτα επιμένοντας, και καίμε επεξεργαστή στο αυτοκίνητο.

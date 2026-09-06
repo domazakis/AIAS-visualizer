@@ -1,9 +1,15 @@
 package gr.aias.carviz
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Button
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 /**
  * Η οθόνη στο κινητό. Δείχνει τα διαγνωστικά που άφησε ο renderer όσο ήταν
@@ -16,7 +22,41 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tv: TextView
+    private lateinit var voice: Button
     private var preview: android.widget.LinearLayout? = null
+
+    /**
+     * Το μικρόφωνο ζητείται εδώ και όχι στην υπηρεσία: μια υπηρεσία δεν μπορεί
+     * να δείξει διάλογο αδείας, και χωρίς αυτήν το AudioRecord ανοίγει αλλά
+     * επιστρέφει σιωπή — που είναι το χειρότερο είδος αποτυχίας, γιατί μοιάζει
+     * με «δεν με ακούει».
+     */
+    private fun toggleVoice() {
+        if (Voice.active) {
+            stopService(Intent(this, VoiceService::class.java))
+            Voice.reset()
+            Voice.status = "ανενεργή"
+            refresh()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            return
+        }
+        startService(Intent(this, VoiceService::class.java))
+        refresh()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            startService(Intent(this, VoiceService::class.java))
+        }
+        refresh()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,9 +71,16 @@ class MainActivity : AppCompatActivity() {
             setPadding(56, 0, 56, 56)
         }
         preview = pv
+        voice = Button(this).apply {
+            setOnClickListener { toggleVoice() }
+        }
         val col = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             addView(tv)
+            addView(voice, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(56, 0, 56, 40) })
             addView(pv)
         }
         setContentView(ScrollView(this).apply { addView(col) })
@@ -65,7 +112,20 @@ class MainActivity : AppCompatActivity() {
             }.start()
             return
         }
-        tv.text = report() + "\n\n" + INSTRUCTIONS
+        refresh()
+    }
+
+    private fun refresh() {
+        voice.text = if (Voice.active) "Σταμάτα τη φωνή" else "Ξεκίνα τη φωνή"
+        val v = buildString {
+            append("\n\nΦΩΝΗ: ").append(Voice.status)
+            if (Voice.active) {
+                append("\n  κατάσταση: ").append(Voice.mode)
+                if (Voice.lastUser.isNotEmpty()) append("\n  εσύ: ").append(Voice.lastUser)
+                if (Voice.lastAgent.isNotEmpty()) append("\n  ΑΙΑΣ: ").append(Voice.lastAgent)
+            }
+        }
+        tv.text = report() + v + "\n\n" + INSTRUCTIONS
     }
 
     private fun report(): String {
