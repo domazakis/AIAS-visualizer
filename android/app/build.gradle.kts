@@ -11,8 +11,8 @@ android {
         applicationId = "gr.aias.carviz"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4-bars-fast"
+        versionCode = 5
+        versionName = "0.5-nav"
     }
 
     buildTypes {
