@@ -74,13 +74,25 @@ class MainActivity : AppCompatActivity() {
         voice = Button(this).apply {
             setOnClickListener { toggleVoice() }
         }
+        val viz = Button(this).apply {
+            text = "Δες τις τελείες"
+            setOnClickListener { startActivity(Intent(this@MainActivity, VizActivity::class.java)) }
+        }
         val col = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
+            // Τα κουμπιά ΠΑΝΩ από το κείμενο. Ήταν από κάτω, και με τρεις
+            // οθόνες οδηγιών μπροστά τους δεν τα έβρισκε κανείς — ούτε καν το
+            // uiautomator, που τα ανέφερε ως ανύπαρκτα επειδή ήταν εκτός
+            // ορατής περιοχής.
+            val lp = {
+                android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(56, 24, 56, 24) }
+            }
+            addView(viz, lp())
+            addView(voice, lp())
             addView(tv)
-            addView(voice, android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(56, 0, 56, 40) })
             addView(pv)
         }
         setContentView(ScrollView(this).apply { addView(col) })

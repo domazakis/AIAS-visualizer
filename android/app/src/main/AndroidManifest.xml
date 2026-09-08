@@ -57,6 +57,14 @@
             </intent-filter>
         </service>
 
+        <!-- Οι τελείες στην οθόνη του κινητού: δοκιμή χωρίς αυτοκίνητο, και
+             εφεδρεία αν το Android Auto δυστροπήσει. -->
+        <activity
+            android:name=".VizActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+
         <service
             android:name=".VoiceService"
             android:exported="false"
