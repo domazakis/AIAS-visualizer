@@ -2,12 +2,16 @@ package gr.aias.carviz
 
 import android.graphics.Canvas
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 /**
  * Οι τελείες στην οθόνη του **κινητού**.
@@ -42,25 +46,54 @@ class VizActivity : AppCompatActivity(), SurfaceHolder.Callback {
         super.onCreate(savedInstanceState)
         requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Ζωγραφίζουμε ΠΑΝΩ από την εγκοπή της κάμερας.
+        //
+        // Χωρίς αυτό, το παράθυρο ξεκινούσε στο x=77 αντί για 0 — το περιθώριο
+        // της τρύπας, που σε οριζόντια θέση πέφτει στο πλάι. Μετρημένο με
+        // dumpsys: mBounds ήταν [0,0..1600,720] αλλά το frame [77,0..1600,720].
+        // Οι τελείες κεντράρονταν σωστά μέσα στην επιφάνεια, στο 838,5 — και
+        // ακριβώς 38 εικονοστοιχεία δεξιά από το κέντρο της οθόνης, όσο μισό
+        // το περιθώριο. Το μάτι το έβλεπε αμέσως· η αριθμητική επιβεβαίωσε ότι
+        // δεν έφταιγε ο renderer αλλά το παράθυρο.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val lp = window.attributes
+            lp.layoutInDisplayCutoutMode =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                else
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = lp
+        }
         val sv = SurfaceView(this)
         sv.holder.addCallback(this)
         setContentView(sv)
-        hideBars(sv)
+        hideBars()
     }
 
-    private fun hideBars(sv: SurfaceView) {
-        @Suppress("DEPRECATION")
-        sv.systemUiVisibility =
-            View_SYSTEM_UI_FLAG_FULLSCREEN or View_SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View_SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View_SYSTEM_UI_FLAG_LAYOUT_STABLE
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Οι μπάρες επιστρέφουν μετά από κάθε αλληλεπίδραση· τις ξανακρύβουμε.
+        if (hasFocus) hideBars()
     }
 
-    // Σταθερές αντί για import: το View.* είναι παρωχημένο αλλά δουλεύει από
-    // το API 24, ενώ το WindowInsetsController θέλει 30.
-    private val View_SYSTEM_UI_FLAG_FULLSCREEN = 4
-    private val View_SYSTEM_UI_FLAG_HIDE_NAVIGATION = 2
-    private val View_SYSTEM_UI_FLAG_IMMERSIVE_STICKY = 4096
-    private val View_SYSTEM_UI_FLAG_LAYOUT_STABLE = 256
+    /**
+     * Πλήρης οθόνη, με το σύγχρονο API.
+     *
+     * Η πρώτη εκδοχή χρησιμοποιούσε τις σημαίες `systemUiVisibility`, που είναι
+     * παρωχημένες από το API 30 και **αγνοούνται** στο Android 15. Αποτέλεσμα:
+     * η επιφάνεια σχεδίασης έμενε μέσα στα περιθώρια των μπαρών — γκρίζα
+     * λωρίδα επάνω και δεξιά — και οι τελείες, ενώ ήταν κεντραρισμένες μέσα
+     * στην επιφάνεια, φαίνονταν μετατοπισμένες μέσα στην οθόνη.
+     */
+    private fun hideBars() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
 
     override fun surfaceCreated(h: SurfaceHolder) {
         holder = h

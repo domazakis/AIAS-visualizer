@@ -23,8 +23,8 @@ android {
         applicationId = "gr.aias.carviz"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.8-viz"
+        versionCode = 10
+        versionName = "0.10-centred"
         buildConfigField("String", "AGENT_ID", "\"$agentId\"")
     }
 
