@@ -293,9 +293,15 @@ class VoiceService : Service() {
                 var sum = 0.0
                 for (s in pcm) { val v = s / 32768.0; sum += v * v }
                 val rms = sqrt(sum / maxOf(1, pcm.size))
-                // Η φωνή σπάνια ξεπερνά RMS 0.3· κανονικοποιούμε εκεί ώστε να
-                // φτάνει η στάθμη στην περιοχή που μετρήθηκε ως πορτοκαλί.
-                Voice.level = min(1.0, rms / 0.30).toFloat()
+                // Η κανονικοποίηση ήταν στο 0.30 και ήταν λάθος: κανονική
+                // ομιλία δίνει RMS γύρω στο 0.05–0.15, οπότε η στάθμη δεν
+                // ξεπερνούσε ποτέ το μισό και οι τελείες έμεναν υποτονικές.
+                //
+                // Αναφορά στο 0.12, και εκθέτης 0.7 από πάνω: το αυτί ακούει
+                // λογαριθμικά, οπότε η γραμμική RMS υποτιμά τα χαμηλά. Ο
+                // εκθέτης ανεβάζει τα ήσυχα χωρίς να κορεννύει τα δυνατά.
+                val norm = (rms / 0.12).coerceIn(0.0, 1.0)
+                Voice.level = Math.pow(norm, 0.7).toFloat()
                 Voice.mode = "speak"
                 lastAudioAt = System.currentTimeMillis()
                 try { track?.write(pcm, 0, pcm.size) } catch (e: Throwable) { }

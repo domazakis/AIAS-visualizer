@@ -52,7 +52,7 @@ class Demo {
                 // δεν κάθεται ποτέ στο ταβάνι· βουτάει σε κάθε συλλαβή.
                 val syllable = Math.pow(abs(sin(s * 5.2f)).toDouble(), 1.3).toFloat()
                 val phrase = 0.35f + 0.65f * (0.5f + 0.5f * sin(s * 0.62f))
-                bars.level = (0.06f + 0.56f * syllable * phrase).coerceIn(0f, 1f)
+                bars.level = (0.06f + 0.86f * syllable * phrase).coerceIn(0f, 1f)
             }
         }
     }
