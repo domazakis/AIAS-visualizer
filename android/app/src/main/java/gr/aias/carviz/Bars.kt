@@ -181,7 +181,16 @@ class Bars {
         if (d > 0.24f) burst = min(1f, burst + d * 0.70f)
         burst *= Math.pow(0.45, dt.toDouble()).toFloat()
         mixListen += ((if (mode == "listen") 1f else 0f) - mixListen) * min(1f, dt * 1.5f)
-        mixSpeak += ((if (mode == "speak") 1f else 0f) - mixSpeak) * min(1f, dt * 1.9f)
+        // Ασύμμετρη μετάβαση: γρήγορα προς την ομιλία, αργά προς την ακρόαση.
+        //
+        // Ήταν συμμετρική στο 1.9, που σήμαινε πάνω από ένα δευτερόλεπτο για να
+        // κατασταλεί το κύμα — και επειδή το `bnc` σβήνει με τον παράγοντα
+        // (1 − mixSpeak), οι τελείες συνέχιζαν να κυματίζουν ενώ μιλούσε. Τώρα
+        // ησυχάζουν σε κλάσμα του δευτερολέπτου, και επιστρέφουν στο κύμα με
+        // την ησυχία της αργής καθόδου.
+        val spTarget = if (mode == "speak") 1f else 0f
+        val spRate = if (spTarget > mixSpeak) 6.0f else 1.2f
+        mixSpeak += (spTarget - mixSpeak) * min(1f, dt * spRate)
         val gt = smoothed * 0.85f + mixSpeak * 0.22f
         glowEnv += (gt - glowEnv) * min(1f, dt * (if (gt > glowEnv) 2.0f else 0.8f))
     }
