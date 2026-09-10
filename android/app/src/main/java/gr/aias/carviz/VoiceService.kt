@@ -24,6 +24,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -58,7 +59,7 @@ class VoiceService : Service() {
          * σε «ακρόαση», το κύμα ξαναξεκινούσε, και οι τελείες δεν ησύχαζαν ποτέ
          * στη μέση όσο μιλούσε.
          */
-        private const val SPEAK_TAIL_MS = 750L
+        private const val SPEAK_TAIL_MS = 400L
     }
 
     private var ws: WebSocket? = null
@@ -67,6 +68,9 @@ class VoiceService : Service() {
     @Volatile private var running = false
     @Volatile private var outRate = 16000
     @Volatile private var lastAudioAt = 0L
+
+    /** Η κορυφή των τελευταίων δευτερολέπτων, για τον αυτόματο έλεγχο κέρδους. */
+    private var peak = 0.0
 
     /** Ουρά αναπαραγωγής. Φραγμένη: αν γεμίσει, καλύτερα να χαθεί ήχος παρά μνήμη. */
     private val playQueue = ArrayBlockingQueue<ShortArray>(64)
@@ -300,15 +304,25 @@ class VoiceService : Service() {
                 var sum = 0.0
                 for (s in pcm) { val v = s / 32768.0; sum += v * v }
                 val rms = sqrt(sum / maxOf(1, pcm.size))
-                // Η κανονικοποίηση ήταν στο 0.30 και ήταν λάθος: κανονική
-                // ομιλία δίνει RMS γύρω στο 0.05–0.15, οπότε η στάθμη δεν
-                // ξεπερνούσε ποτέ το μισό και οι τελείες έμεναν υποτονικές.
+                // ΑΥΤΟΜΑΤΟΣ ΕΛΕΓΧΟΣ ΚΕΡΔΟΥΣ, αντί για σταθερή αναφορά.
                 //
-                // Αναφορά στο 0.12, και εκθέτης 0.7 από πάνω: το αυτί ακούει
-                // λογαριθμικά, οπότε η γραμμική RMS υποτιμά τα χαμηλά. Ο
-                // εκθέτης ανεβάζει τα ήσυχα χωρίς να κορεννύει τα δυνατά.
-                val norm = (rms / 0.12).coerceIn(0.0, 1.0)
-                Voice.level = Math.pow(norm, 0.7).toFloat()
+                // Δύο σταθερές δοκιμάστηκαν και οι δύο απέτυχαν, για αντίθετους
+                // λόγους: το 0.30 άφηνε τις τελείες μισοάδειες, το 0.12 τις
+                // κόλλαγε τέρμα ανοιχτές χωρίς καμία δυναμική. Το πρόβλημα δεν
+                // είναι ποιο νούμερο· είναι ότι **δεν υπάρχει σωστό νούμερο** —
+                // η ένταση εξαρτάται από τη φωνή, τον agent και την ένταση
+                // αναπαραγωγής, και αλλάζει.
+                //
+                // Αντ' αυτού κρατάμε την κορυφή των τελευταίων δευτερολέπτων:
+                // ανεβαίνει ακαριαία, κατεβαίνει αργά. Η στάθμη γίνεται λόγος
+                // ως προς αυτήν, οπότε η δυνατή συλλαβή δίνει 1 και η ήσυχη
+                // κάτι σαφώς μικρότερο — **δυναμική εξ ορισμού**, όποια κι αν
+                // είναι η απόλυτη ένταση.
+                peak = max(rms, peak * 0.985)
+                val ref = max(peak, 0.03)
+                val norm = (rms / ref).coerceIn(0.0, 1.0)
+                Voice.level = Math.pow(norm, 0.85).toFloat()
+                Voice.note(Voice.level)
                 Voice.mode = "speak"
                 lastAudioAt = System.currentTimeMillis()
                 try { track?.write(pcm, 0, pcm.size) } catch (e: Throwable) { }

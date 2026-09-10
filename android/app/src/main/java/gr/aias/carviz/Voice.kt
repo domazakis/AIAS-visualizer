@@ -33,11 +33,31 @@ object Voice {
     @Volatile var lastUser = ""
     @Volatile var lastAgent = ""
 
+    /**
+     * Εύρος στάθμης των τελευταίων δειγμάτων, μόνο για διάγνωση.
+     *
+     * Μπήκε επειδή δύο φορές ρυθμίσαμε την ένταση στα τυφλά και δύο φορές
+     * βγήκε λάθος. Αν το ελάχιστο και το μέγιστο είναι κολλημένα μαζί, δεν
+     * υπάρχει δυναμική και το ξέρουμε με νούμερο αντί για εντύπωση.
+     */
+    @Volatile var lo = 1f
+    @Volatile var hi = 0f
+
+    fun note(v: Float) {
+        if (v < lo) lo = v
+        if (v > hi) hi = v
+    }
+
+    /** Καλείται μία φορά το δευτερόλεπτο, αφού καταγραφεί το εύρος. */
+    fun rollWindow() { lo = 1f; hi = 0f }
+
     fun reset() {
         active = false
         level = 0f
         mode = "idle"
         lastUser = ""
         lastAgent = ""
+        lo = 1f
+        hi = 0f
     }
 }

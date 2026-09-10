@@ -120,7 +120,20 @@ class VizActivity : AppCompatActivity(), SurfaceHolder.Callback {
         running = true
         thread = Thread({
             var prev = System.nanoTime()
+            var mark = prev
             while (running) {
+                // Μία φορά το δευτερόλεπτο, το εύρος της στάθμης στα διαγνωστικά.
+                // Δύο φορές ρυθμίσαμε την ένταση στα τυφλά και δύο φορές βγήκε
+                // λάθος· με νούμερο φαίνεται αμέσως αν υπάρχει δυναμική ή αν
+                // είναι κολλημένη στο τέρμα.
+                if (Voice.active && System.nanoTime() - mark > 1_000_000_000L) {
+                    mark = System.nanoTime()
+                    try {
+                        Diag.put(this, "στάθμη",
+                            "%.2f – %.2f · %s".format(Voice.lo, Voice.hi, Voice.mode))
+                    } catch (e: Throwable) { }
+                    Voice.rollWindow()
+                }
                 val h = holder
                 val now = System.nanoTime()
                 var dt = (now - prev) / 1e9f

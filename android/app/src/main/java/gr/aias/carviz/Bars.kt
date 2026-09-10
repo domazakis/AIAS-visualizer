@@ -189,7 +189,7 @@ class Bars {
         // ησυχάζουν σε κλάσμα του δευτερολέπτου, και επιστρέφουν στο κύμα με
         // την ησυχία της αργής καθόδου.
         val spTarget = if (mode == "speak") 1f else 0f
-        val spRate = if (spTarget > mixSpeak) 6.0f else 1.2f
+        val spRate = if (spTarget > mixSpeak) 6.0f else 2.5f
         mixSpeak += (spTarget - mixSpeak) * min(1f, dt * spRate)
         val gt = smoothed * 0.85f + mixSpeak * 0.22f
         glowEnv += (gt - glowEnv) * min(1f, dt * (if (gt > glowEnv) 2.0f else 0.8f))
@@ -213,7 +213,7 @@ class Bars {
         // Ο συντελεστής της έντασης ανέβηκε από 1.35 σε 1.55: μαζί με τη
         // διορθωμένη κανονικοποίηση της στάθμης, κανονική ομιλία φτάνει πλέον
         // γύρω στο 85% του ύψους και μια δυνατή λέξη το τερματίζει.
-        var sp = 0.14f + lv * 1.55f * wob + 0.20f * br
+        var sp = 0.14f + lv * 1.25f * wob + 0.20f * br
         sp = sp.coerceIn(0f, 1f)
         val tg = sp * mixSpeak
         val tau = if (tg > ext) 0.035f else 0.115f
