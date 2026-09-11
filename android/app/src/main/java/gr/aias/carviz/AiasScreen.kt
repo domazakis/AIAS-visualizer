@@ -52,16 +52,32 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
         val i = Intent(carContext, VoiceService::class.java)
         if (Voice.active) carContext.stopService(i) else carContext.startService(i)
         invalidate()
-        // Η εκκίνηση της υπηρεσίας δεν είναι ακαριαία· χωρίς δεύτερη ανανέωση
-        // η ετικέτα θα έδειχνε την προηγούμενη κατάσταση ως το επόμενο πάτημα.
-        android.os.Handler(android.os.Looper.getMainLooper())
-            .postDelayed({ invalidate() }, 600)
+        // Η εκκίνηση της υπηρεσίας δεν είναι ακαριαία, και η σύνδεση στον agent
+        // ακόμη λιγότερο· χωρίς αυτές τις ανανεώσεις η ετικέτα θα έμενε στην
+        // προηγούμενη κατάσταση ως το επόμενο πάτημα. Λίγες και αραιές, γιατί
+        // ο host μετράει τις ανανεώσεις προτύπου.
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        for (ms in longArrayOf(600, 2500, 6000)) h.postDelayed({ invalidate() }, ms)
     }
 
-    private fun label(): String = when {
-        !micGranted() -> "Άδεια από κινητό"
-        Voice.active -> "Σταμάτα"
-        else -> "Μίλα"
+    /**
+     * Η ετικέτα λέει την **αλήθεια**, όχι την πρόθεση.
+     *
+     * Στο αυτοκίνητο το κουμπί έγραφε «Σταμάτα» ενώ ο agent δεν είχε συνδεθεί
+     * ποτέ — το κινητό είναι χωρίς κάρτα SIM και δεν υπήρχε δίκτυο. Ο οδηγός
+     * κοιτούσε μια οθόνη που δήλωνε ότι δουλεύει και δεν άκουγε τίποτα. Ό,τι
+     * ξέρει η υπηρεσία πρέπει να φτάνει ως εδώ.
+     */
+    private fun label(): String {
+        if (!micGranted()) return "Άδεια από κινητό"
+        if (!Voice.active) return "Μίλα"
+        val s = Voice.status
+        return when {
+            s.startsWith("χωρίς ίντερνετ") -> "Χωρίς ίντερνετ"
+            s.startsWith("σφάλμα") -> "Σφάλμα σύνδεσης"
+            s.startsWith("σύνδεση") -> "Συνδέεται…"
+            else -> "Σταμάτα"
+        }
     }
 
     override fun onGetTemplate(): Template =

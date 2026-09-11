@@ -78,6 +78,20 @@ class MainActivity : AppCompatActivity() {
             text = "Δες τις τελείες"
             setOnClickListener { startActivity(Intent(this@MainActivity, VizActivity::class.java)) }
         }
+        // Κάνει τον ΑΙΑΝΤΑ να απαντήσει χωρίς να του μιλήσει κανείς: ο μόνος
+        // τρόπος να ελεγχθεί ο συγχρονισμός εικόνας-ήχου χωρίς δεύτερο άτομο
+        // και χωρίς αυτοκίνητο.
+        val probe = Button(this).apply {
+            text = "Βάλ' τον να μιλήσει"
+            setOnClickListener {
+                val ok = VoiceService.δοκιμή()
+                android.widget.Toast.makeText(
+                    this@MainActivity,
+                    if (ok) "στάλθηκε — άνοιξε τις τελείες" else "δεν υπάρχει σύνδεση",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
         val col = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             // Τα κουμπιά ΠΑΝΩ από το κείμενο. Ήταν από κάτω, και με τρεις
@@ -92,6 +106,7 @@ class MainActivity : AppCompatActivity() {
             }
             addView(viz, lp())
             addView(voice, lp())
+            addView(probe, lp())
             addView(tv)
             addView(pv)
         }

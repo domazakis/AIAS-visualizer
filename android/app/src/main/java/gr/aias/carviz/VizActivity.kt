@@ -130,7 +130,9 @@ class VizActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     mark = System.nanoTime()
                     try {
                         Diag.put(this, "στάθμη",
-                            "%.2f – %.2f · %s".format(Voice.lo, Voice.hi, Voice.mode))
+                            "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s".format(
+                                Voice.lo, Voice.hi, Voice.mode, Voice.micHi,
+                                Voice.histLine(), Voice.extLine()))
                     } catch (e: Throwable) { }
                     Voice.rollWindow()
                 }

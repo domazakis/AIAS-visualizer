@@ -4,14 +4,17 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.util.Base64
@@ -24,8 +27,11 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
@@ -51,29 +57,68 @@ class VoiceService : Service() {
         /** Η είσοδος του agent είναι PCM 16 kHz, μονοφωνικό, 16 bit. */
         private const val IN_RATE = 16000
 
+        /** Πόσα δείγματα καλύπτει μία τιμή της περιβάλλουσας: ~20 ms. */
+        private const val ENV_MS = 20
+
         /**
-         * Πόσο μετά το τελευταίο καρέ ήχου θεωρούμε ότι σταμάτησε να μιλάει.
-         *
-         * Ήταν 300 ms και ήταν πολύ λίγο: ο λόγος έχει κενά ανάμεσα στις λέξεις
-         * μεγαλύτερα από τόσο, οπότε σε κάθε ανάσα η κατάσταση πεταγόταν πίσω
-         * σε «ακρόαση», το κύμα ξαναξεκινούσε, και οι τελείες δεν ησύχαζαν ποτέ
-         * στη μέση όσο μιλούσε.
+         * Θέσεις στον κυκλικό πίνακα της περιβάλλουσας. Στα 20 ms η καθεμιά,
+         * οι 8192 είναι δυόμισι λεπτά συνεχούς ομιλίας — πολλαπλάσιο του
+         * μέγιστου που μπορεί να προηγείται η γραφή της ανάγνωσης.
          */
-        private const val SPEAK_TAIL_MS = 400L
+        private const val ENV_SIZE = 8192
+
+        /** Το ανοιχτό WebSocket, για τη [δοκιμή]. */
+        @Volatile private var live: WebSocket? = null
+
+        /**
+         * Βάζει τον agent να μιλήσει **χωρίς να μιλήσει κανείς**.
+         *
+         * Επί δέκα μέρες κάθε δοκιμή της εικόνας απαιτούσε άνθρωπο να πει κάτι
+         * σε μικρόφωνο — που σημαίνει ότι τίποτα δεν ελεγχόταν από εδώ, και
+         * κάθε λάθος στη στάθμη το ανακάλυπτε ο οδηγός στον δρόμο. Μια γραπτή
+         * ατάκα κάνει τον βοηθό να απαντήσει κανονικά, με πραγματικό ήχο, άρα
+         * ελέγχεται ολόκληρη η αλυσίδα ως τα ηχεία και τις τελείες.
+         */
+        fun δοκιμή(text: String = "Πες μου με δικά σου λόγια, σε πέντε έξι προτάσεις, τι είναι ο χάρτης και γιατί τον φτιάχνει ο άνθρωπος."): Boolean {
+            val w = live ?: return false
+            return try {
+                w.send(JSONObject().put("type", "user_message").put("text", text).toString())
+            } catch (e: Throwable) { false }
+        }
     }
 
     private var ws: WebSocket? = null
+    private val retrying = AtomicBoolean(false)
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
     @Volatile private var outRate = 16000
-    @Volatile private var lastAudioAt = 0L
-
-    /** Η κορυφή των τελευταίων δευτερολέπτων, για τον αυτόματο έλεγχο κέρδους. */
-    private var peak = 0.0
 
     /** Ουρά αναπαραγωγής. Φραγμένη: αν γεμίσει, καλύτερα να χαθεί ήχος παρά μνήμη. */
     private val playQueue = ArrayBlockingQueue<ShortArray>(64)
+
+    // ------------------------------------------------ η περιβάλλουσα του ήχου
+    //
+    // Η στάθμη ΔΕΝ βγαίνει πια από το κομμάτι τη στιγμή που το γράφουμε: αυτό
+    // ήταν το λάθος που έκανε την εικόνα άσχετη με τη φωνή. Το `track.write()`
+    // ΜΠΛΟΚΑΡΕΙ όσο αδειάζει ο απομονωτής, άρα η στάθμη οριζόταν μία φορά ανά
+    // κομμάτι, μισό δευτερόλεπτο ΠΡΙΝ ακουστεί ο ήχος, και έμενε παγωμένη σε
+    // όλο του το μήκος. Τώρα κρατάμε την ενέργεια ανά 20 ms σε κυκλικό πίνακα
+    // και τη διαβάζουμε με τη ΘΕΣΗ ΤΗΣ ΚΕΦΑΛΗΣ ΑΝΑΠΑΡΑΓΩΓΗΣ — δηλαδή με ό,τι
+    // βγαίνει από το ηχείο αυτή τη στιγμή. Ο συγχρονισμός γίνεται ταυτότητα,
+    // όχι εκτίμηση.
+
+    private val env = FloatArray(ENV_SIZE)
+    /** Πόσες θέσεις έχουν γραφτεί — αυξάνει μονότονα από το τελευταίο άδειασμα. */
+    @Volatile private var envWrite = 0
+    /** Δείγματα που δόθηκαν στο [AudioTrack] από το τελευταίο άδειασμα. */
+    @Volatile private var written = 0L
+    private var envAcc = 0.0
+    private var envCount = 0
+    private var envHop = 320
+
+    /** Η κορυφή των τελευταίων δευτερολέπτων, για τον αυτόματο έλεγχο κέρδους. */
+    private var peak = 0.0
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)   // ο ήχος έρχεται συνεχώς
@@ -91,7 +136,7 @@ class VoiceService : Service() {
         connect()
         startCapture()
         startPlayback()
-        startModeTicker()
+        startLevelTicker()
         return START_STICKY
     }
 
@@ -132,6 +177,23 @@ class VoiceService : Service() {
         }
     }
 
+    // ------------------------------------------------------------ δίκτυο
+
+    /**
+     * Υπάρχει ίντερνετ;
+     *
+     * Μπήκε επειδή στο αυτοκίνητο το κινητό **δεν έχει κάρτα SIM** και δεν
+     * υπάρχει Wi-Fi· το WebSocket απέτυχε με μήνυμα `null`, τα διαγνωστικά
+     * έγραψαν «σφάλμα: null» και στην οθόνη φαινόταν απλώς ένας βοηθός που δεν
+     * μιλάει. Η διαφορά ανάμεσα σε «δεν έχω γραμμή» και «κάτι χάλασε» πρέπει
+     * να είναι ορατή πριν ξεκινήσουμε, όχι να συμπεραίνεται μετά.
+     */
+    private fun online(): Boolean = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Throwable) { true }   // σε αμφιβολία, δοκιμάζουμε
+
     // ------------------------------------------------------------ σύνδεση
 
     private fun connect() {
@@ -142,12 +204,21 @@ class VoiceService : Service() {
             Log.e(TAG, "AGENT_ID κενό")
             return
         }
+        if (!online()) {
+            Voice.status = "χωρίς ίντερνετ"
+            note("φωνή", "χωρίς ίντερνετ — ο agent είναι στο δίκτυο")
+            Log.w(TAG, "καμία σύνδεση· περιμένουμε")
+            retryLater()
+            return
+        }
         val url = "wss://api.elevenlabs.io/v1/convai/conversation?agent_id=$id"
         Voice.status = "σύνδεση…"
         ws = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "συνδέθηκε")
+                live = webSocket
+
                 Voice.status = "συνδεδεμένος"
                 Voice.mode = "listen"
                 note("φωνή", "συνδεδεμένος στον agent")
@@ -159,17 +230,46 @@ class VoiceService : Service() {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "αποτυχία WebSocket", t)
-                Voice.status = "σφάλμα σύνδεσης: ${t.message}"
+                // Το `t.message` είναι συχνά κενό· η κλάση λέει πάντα κάτι.
+                live = null
+
+                val why = t.message ?: t.javaClass.simpleName
+                val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
+                Voice.status = msg
                 Voice.mode = "idle"
-                note("φωνή", "σφάλμα: ${t.message}")
+                note("φωνή", msg)
+                retryLater()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                live = null
                 Log.i(TAG, "έκλεισε: $code $reason")
                 Voice.status = "αποσυνδέθηκε"
                 Voice.mode = "idle"
+                retryLater()
             }
         })
+    }
+
+    /**
+     * Ξαναδοκιμάζει σε τρία δευτερόλεπτα, όσο τρέχει η υπηρεσία.
+     *
+     * Χωρίς αυτό, μία αποτυχία στην αρχή —μπαίνοντας στο αυτοκίνητο πριν
+     * πιάσει το hotspot, ας πούμε— σήμαινε βουβό βοηθό για όλη τη διαδρομή,
+     * με το κουμπί να λέει «Σταμάτα» σαν να δούλευε.
+     */
+    private fun retryLater() {
+        // Η αποτυχία φτάνει και από το `onFailure` και από το `onClosed`· χωρίς
+        // τον μανδαλωτή θα ξεκινούσαν δύο προσπάθειες για το ίδιο πράγμα.
+        if (!running || !retrying.compareAndSet(false, true)) return
+        Thread({
+            try { Thread.sleep(3000) } catch (e: InterruptedException) { }
+            retrying.set(false)
+            if (!running) return@Thread
+            try { ws?.cancel() } catch (e: Throwable) { }
+            ws = null
+            connect()
+        }, "aias-retry").start()
     }
 
     private fun handle(webSocket: WebSocket, text: String) {
@@ -197,8 +297,7 @@ class VoiceService : Service() {
                     // Ο χρήστης έκοψε τον agent: πετάμε ό,τι δεν παίχτηκε ακόμη,
                     // αλλιώς η φωνή συνεχίζει να μιλάει αφού έχει σταματήσει.
                     playQueue.clear()
-                    try { track?.pause(); track?.flush(); track?.play() } catch (e: Throwable) { }
-                    Voice.mode = "listen"
+                    flushAudio()
                 }
                 "user_transcript" ->
                     Voice.lastUser = o.optJSONObject("user_transcription_event")
@@ -241,15 +340,26 @@ class VoiceService : Service() {
             // καθυστέρηση, αρκετά μεγάλο για να μην πνίγεται το δίκτυο.
             val chunk = ShortArray(IN_RATE / 10)
             val bytes = ByteArray(chunk.size * 2)
+            var silent = 0
             while (running) {
                 val n = rec.read(chunk, 0, chunk.size)
                 if (n <= 0) continue
                 var j = 0
+                var sum = 0.0
                 for (i in 0 until n) {
                     val v = chunk[i].toInt()
+                    sum += (v / 32768.0) * (v / 32768.0)
                     bytes[j++] = (v and 0xFF).toByte()
                     bytes[j++] = ((v shr 8) and 0xFF).toByte()
                 }
+                // Αν το μικρόφωνο δίνει απόλυτη σιωπή για δέκα δευτερόλεπτα,
+                // κάποιος άλλος μας το πήρε — ο Βοηθός του αυτοκινήτου είναι ο
+                // υποψήφιος. Το καταγράφουμε: αλλιώς φαίνεται σαν να μη μιλάει
+                // κανείς, και δεν ξεχωρίζει από τη σιωπή του οδηγού.
+                val mrms = sqrt(sum / n).toFloat()
+                Voice.noteMic(mrms)
+                if (mrms < 1e-5f) silent++ else silent = 0
+                if (silent == 100) note("φωνή", "το μικρόφωνο δίνει σιωπή — το πήρε άλλος;")
                 val b64 = Base64.encodeToString(bytes, 0, n * 2, Base64.NO_WRAP)
                 try {
                     ws?.send(JSONObject().put("user_audio_chunk", b64).toString())
@@ -277,8 +387,39 @@ class VoiceService : Service() {
             .setBufferSizeInBytes(maxOf(min, outRate / 2))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+        envHop = max(1, outRate * ENV_MS / 1000)
+        resetTimeline()
         t.play()
         track = t
+        noteRoute(t)
+    }
+
+    /**
+     * Πού βγαίνει τελικά ο ήχος.
+     *
+     * Στο αυτοκίνητο δεν ακούστηκε τίποτα και δεν υπήρχε τρόπος να ξεχωρίσεις
+     * «δεν ήρθε ήχος» από «ήρθε αλλά βγήκε στο ηχείο του κινητού». Το
+     * [AudioTrack.getRoutedDevice] το λέει με το όνομα της συσκευής.
+     */
+    private fun noteRoute(t: AudioTrack) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        Thread({
+            try { Thread.sleep(400) } catch (e: InterruptedException) { return@Thread }
+            val d = try { t.routedDevice } catch (e: Throwable) { null }
+            val name = when (d?.type) {
+                null -> "άγνωστη"
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "ηχείο κινητού"
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth (μουσική)"
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth (κλήση)"
+                AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB"
+                AudioDeviceInfo.TYPE_BUS -> "δίαυλος αυτοκινήτου"
+                AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "ακουστικά"
+                else -> "τύπος ${d.type}"
+            }
+            Voice.route = name
+            note("ήχος", "$name · $outRate Hz")
+        }, "aias-route").start()
     }
 
     private fun enqueue(b64: String) {
@@ -292,53 +433,134 @@ class VoiceService : Service() {
         if (!playQueue.offer(pcm)) { playQueue.poll(); playQueue.offer(pcm) }
     }
 
+    // -------------------------------------------------- χρονογραμμή και στάθμη
+
+    private fun resetTimeline() {
+        synchronized(env) {
+            java.util.Arrays.fill(env, 0f)
+            envWrite = 0
+            envAcc = 0.0
+            envCount = 0
+            written = 0L
+        }
+    }
+
+    /** Το `flush()` μηδενίζει την κεφαλή· μηδενίζουμε μαζί και τη χρονογραμμή. */
+    private fun flushAudio() {
+        val t = track ?: return
+        try {
+            t.pause()
+            t.flush()
+            resetTimeline()
+            t.play()
+        } catch (e: Throwable) { }
+    }
+
+    /** Γράφει την ενέργεια του κομματιού στη χρονογραμμή, ανά [envHop] δείγματα. */
+    private fun fillEnvelope(pcm: ShortArray) {
+        synchronized(env) {
+            for (s in pcm) {
+                val v = s / 32768.0
+                envAcc += v * v
+                if (++envCount >= envHop) {
+                    env[envWrite % ENV_SIZE] = sqrt(envAcc / envCount).toFloat()
+                    envWrite++
+                    envAcc = 0.0
+                    envCount = 0
+                }
+            }
+            written += pcm.size
+        }
+    }
+
     /**
-     * Το νήμα αναπαραγωγής. **Εδώ βγαίνει η στάθμη για τις τελείες**: υπολογίζεται
-     * από το ίδιο κομμάτι τη στιγμή που γράφεται στα ηχεία, οπότε η εικόνα
-     * ακολουθεί τη φωνή και όχι το δίκτυο.
+     * Το νήμα αναπαραγωγής: αποκλειστικά μεταφορά. Καμία στάθμη εδώ — το
+     * `write` μπλοκάρει, και ό,τι υπολογιστεί πριν από αυτό είναι το μέλλον,
+     * όχι το παρόν.
      */
     private fun startPlayback() {
         Thread({
             while (running) {
                 val pcm = playQueue.poll(120, TimeUnit.MILLISECONDS) ?: continue
-                var sum = 0.0
-                for (s in pcm) { val v = s / 32768.0; sum += v * v }
-                val rms = sqrt(sum / maxOf(1, pcm.size))
-                // ΑΥΤΟΜΑΤΟΣ ΕΛΕΓΧΟΣ ΚΕΡΔΟΥΣ, αντί για σταθερή αναφορά.
-                //
-                // Δύο σταθερές δοκιμάστηκαν και οι δύο απέτυχαν, για αντίθετους
-                // λόγους: το 0.30 άφηνε τις τελείες μισοάδειες, το 0.12 τις
-                // κόλλαγε τέρμα ανοιχτές χωρίς καμία δυναμική. Το πρόβλημα δεν
-                // είναι ποιο νούμερο· είναι ότι **δεν υπάρχει σωστό νούμερο** —
-                // η ένταση εξαρτάται από τη φωνή, τον agent και την ένταση
-                // αναπαραγωγής, και αλλάζει.
-                //
-                // Αντ' αυτού κρατάμε την κορυφή των τελευταίων δευτερολέπτων:
-                // ανεβαίνει ακαριαία, κατεβαίνει αργά. Η στάθμη γίνεται λόγος
-                // ως προς αυτήν, οπότε η δυνατή συλλαβή δίνει 1 και η ήσυχη
-                // κάτι σαφώς μικρότερο — **δυναμική εξ ορισμού**, όποια κι αν
-                // είναι η απόλυτη ένταση.
-                peak = max(rms, peak * 0.985)
-                val ref = max(peak, 0.03)
-                val norm = (rms / ref).coerceIn(0.0, 1.0)
-                Voice.level = Math.pow(norm, 0.85).toFloat()
-                Voice.note(Voice.level)
-                Voice.mode = "speak"
-                lastAudioAt = System.currentTimeMillis()
+                fillEnvelope(pcm)
                 try { track?.write(pcm, 0, pcm.size) } catch (e: Throwable) { }
             }
         }, "aias-play").start()
     }
 
-    /** Όταν σταματήσει ο ήχος, επιστρέφουμε στην ακρόαση και σβήνει η στάθμη. */
-    private fun startModeTicker() {
+    /**
+     * Η στάθμη και η κατάσταση, από τη θέση της κεφαλής αναπαραγωγής.
+     *
+     * Τρέχει στα 60 Hz — τρεις μετρήσεις ανά τιμή περιβάλλουσας, αρκετές για
+     * να μη χάνεται συλλαβή. Η κατάσταση «ομιλία» **δεν** στηρίζεται πια σε
+     * χρονόμετρο: μιλάει όσο υπάρχει ήχος στον απομονωτή που δεν έχει βγει
+     * ακόμη. Το παλιό χρονόμετρο των 400 ms μετρούσε από την ΑΦΙΞΗ κομματιού,
+     * κι επειδή ένα κομμάτι μπορεί να γράφεται για ένα δευτερόλεπτο, η
+     * κατάσταση πεταγόταν στην «ακρόαση» στη μέση της πρότασης — ακριβώς το
+     * «σταματούσαν οι μπάρες και γινόταν ο κυματισμός ενώ μιλούσε».
+     */
+    private fun startLevelTicker() {
         Thread({
+            var prev = System.nanoTime()
             while (running) {
-                val quiet = System.currentTimeMillis() - lastAudioAt > SPEAK_TAIL_MS
-                if (quiet && Voice.mode == "speak") Voice.mode = "listen"
-                if (quiet) Voice.level *= 0.80f
-                try { Thread.sleep(50) } catch (e: InterruptedException) { break }
+                try { Thread.sleep(16) } catch (e: InterruptedException) { break }
+                val now = System.nanoTime()
+                val dt = ((now - prev) / 1e9).coerceIn(0.001, 0.1)
+                prev = now
+
+                val t = track
+                val head = if (t == null) 0L else try {
+                    t.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+                } catch (e: Throwable) { 0L }
+
+                var e = 0f
+                var speaking = false
+                synchronized(env) {
+                    // Το υπόλοιπο στον απομονωτή: όσο είναι θετικό, ακούγεται.
+                    val pending = written - head
+                    speaking = pending > envHop / 2
+                    val idx = (head / envHop).toInt()
+                    if (idx in 0 until envWrite && envWrite - idx <= ENV_SIZE) {
+                        e = env[idx % ENV_SIZE]
+                    }
+                }
+
+                if (speaking) {
+                    // ΑΥΤΟΜΑΤΟΣ ΕΛΕΓΧΟΣ ΚΕΡΔΟΥΣ, τώρα σωστά.
+                    //
+                    // Η προηγούμενη εκδοχή έγραφε `peak = max(rms, peak*0.985)`
+                    // και αμέσως μετά `rms/peak`: κάθε κομμάτι πιο δυνατό από
+                    // το προηγούμενο **όριζε το ίδιο** την κορυφή και έβγαινε
+                    // ακριβώς 1.0. Γι' αυτό «μιλούσε πάντα στο τέρμα». Εδώ η
+                    // κορυφή ανεβαίνει ομαλά και πέφτει με τον ΧΡΟΝΟ, όχι με
+                    // τον ρυθμό άφιξης των πακέτων· καμία στιγμή δεν ορίζει
+                    // μόνη της το ταβάνι της.
+                    // Ακαριαία άνοδος, αργή κάθοδος — ο κλασικός ανιχνευτής
+                    // κορυφής. Δοκιμάστηκε και η ομαλή άνοδος (0.12 και 0.06
+                    // ανά βήμα) με περιθώριο 20% στην αναφορά: δεν άλλαξε
+                    // τίποτα, `hi` πάλι 1,00 σε κάθε δευτερόλεπτο ομιλίας.
+                    // Ο λόγος είναι ότι η αρχή κάθε συλλαβής ανεβαίνει μέσα σε
+                    // δύο-τρεις τιμές περιβάλλουσας, πολύ πιο γρήγορα από
+                    // οποιαδήποτε ομαλή άνοδο — άρα την προσπερνούσε πάντα.
+                    //
+                    // Με ακαριαία άνοδο η κορυφή ΕΙΝΑΙ η δυνατότερη πρόσφατη
+                    // στιγμή εξ ορισμού, και ο λόγος `e/peak` γίνεται καθαρή
+                    // αναλογία: 1 στη δυνατότερη συλλαβή, μισό στη μισή. Η
+                    // δυναμική δεν εξαρτάται πια από τον ρυθμό του ανιχνευτή.
+                    if (e > peak) peak = e.toDouble() else peak *= exp(-dt / 2.0)
+                    val ref = max(peak, 0.02)
+                    val norm = (e / ref).coerceIn(0.0, 1.0)
+                    Voice.noteRaw(norm.toFloat())
+                    Voice.level = norm.pow(0.75).toFloat()
+                    Voice.mode = "speak"
+                } else {
+                    // Σβήσιμο με τον χρόνο: 120 ms σταθερά, ίδιο σε κάθε ρυθμό.
+                    Voice.level *= exp(-dt / 0.12).toFloat()
+                    if (Voice.level < 0.004f) Voice.level = 0f
+                    if (Voice.mode == "speak") Voice.mode = "listen"
+                }
+                Voice.note(Voice.level)
             }
-        }, "aias-mode").start()
+        }, "aias-level").start()
     }
 }
