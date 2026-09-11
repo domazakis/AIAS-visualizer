@@ -452,6 +452,12 @@ class VoiceService : Service() {
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth (κλήση)"
                 AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB"
                 AudioDeviceInfo.TYPE_BUS -> "δίαυλος αυτοκινήτου"
+                // Ο δίαυλος που ΣΗΚΩΝΕΙ το Android Auto για να στείλει τον ήχο
+                // του κινητού στο αυτοκίνητο. Μετρημένο στον εξομοιωτή
+                // 12/09/2026: με ενεργή προβολή, ο ήχος μας βγαίνει εδώ και όχι
+                // στο ηχείο του κινητού — δηλαδή το Android Auto τον παραλαμβάνει
+                // κανονικά. Ήταν το ένα από τα δύο άγνωστα που κουβαλούσαμε.
+                AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "προβολή στο αυτοκίνητο"
                 AudioDeviceInfo.TYPE_WIRED_HEADSET,
                 AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "ακουστικά"
                 else -> "τύπος ${d.type}"
