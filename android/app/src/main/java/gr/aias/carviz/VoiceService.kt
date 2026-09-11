@@ -89,6 +89,8 @@ class VoiceService : Service() {
 
     private var ws: WebSocket? = null
     private val retrying = AtomicBoolean(false)
+    /** Πόσες φορές δοκιμάστηκε σύνδεση — μπαίνει στα διαγνωστικά. */
+    private var attempt = 0
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -194,6 +196,40 @@ class VoiceService : Service() {
         caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     } catch (e: Throwable) { true }   // σε αμφιβολία, δοκιμάζουμε
 
+    /**
+     * Τι δίκτυο υπάρχει, με λόγια — για τα διαγνωστικά.
+     *
+     * Η πρώτη διάγνωση της αποτυχίας στο αυτοκίνητο ήταν «δεν υπήρχε ίντερνετ»,
+     * και ήταν ελλιπής: είχε ανοίξει hotspot, απλώς λίγο αργότερα από το πρώτο
+     * πάτημα. Χωρίς καταγραφή του δικτύου, η διαφορά ανάμεσα σε «δεν υπήρχε
+     * γραμμή», «υπήρχε Wi-Fi χωρίς έξοδο» και «υπήρχαν όλα και έφταιγε αλλού»
+     * ήταν αδύνατο να βγει εκ των υστέρων. Τώρα γράφεται πριν από κάθε
+     * προσπάθεια.
+     *
+     * Το `VALIDATED` είναι η ουσιαστική διάκριση: το `INTERNET` σημαίνει μόνο
+     * ότι το δίκτυο **ισχυρίζεται** έξοδο, ενώ το `VALIDATED` ότι το σύστημα
+     * την επαλήθευσε. Ένα hotspot που μόλις σηκώθηκε έχει το πρώτο πριν από
+     * το δεύτερο.
+     */
+    private fun networkNote(): String = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        if (caps == null) "κανένα δίκτυο" else buildString {
+            append(when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "κινητό δίκτυο"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                else -> "άλλο"
+            })
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))
+                append(" · χωρίς έξοδο")
+            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+                append(" · ανεπιβεβαίωτη έξοδος")
+            else append(" · εντάξει")
+        }
+    } catch (e: Throwable) { "άγνωστο" }
+
     // ------------------------------------------------------------ σύνδεση
 
     private fun connect() {
@@ -207,12 +243,14 @@ class VoiceService : Service() {
         if (!online()) {
             Voice.status = "χωρίς ίντερνετ"
             note("φωνή", "χωρίς ίντερνετ — ο agent είναι στο δίκτυο")
+            note("δίκτυο", networkNote() + " · αναμονή")
             Log.w(TAG, "καμία σύνδεση· περιμένουμε")
             retryLater()
             return
         }
         val url = "wss://api.elevenlabs.io/v1/convai/conversation?agent_id=$id"
         Voice.status = "σύνδεση…"
+        note("δίκτυο", "${networkNote()} · προσπάθεια ${++attempt}")
         ws = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -238,6 +276,7 @@ class VoiceService : Service() {
                 Voice.status = msg
                 Voice.mode = "idle"
                 note("φωνή", msg)
+                note("δίκτυο", networkNote() + " · απέτυχε: $why")
                 retryLater()
             }
 
