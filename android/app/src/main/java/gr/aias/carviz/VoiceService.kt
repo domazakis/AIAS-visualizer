@@ -9,7 +9,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
@@ -91,6 +93,15 @@ class VoiceService : Service() {
     private val retrying = AtomicBoolean(false)
     /** Πόσες φορές δοκιμάστηκε σύνδεση — μπαίνει στα διαγνωστικά. */
     private var attempt = 0
+    /** Πότε γράφτηκε τελευταία η γραμμή «στάθμη». */
+    private var diagMark = 0L
+    /** Από πότε κρατάει η σιωπή — για την καθυστερημένη παράδοση εστίασης. */
+    private var quietSince = 0L
+    /** Η μαθημένη στάθμη της ηχούς στο μικρόφωνο, όσο μιλάει ο ΑΙΑΣ. */
+    @Volatile private var echoRef = 0f
+    /** Πόσα κομμάτια πέρασαν και πόσα κόπηκαν — μπαίνουν στα διαγνωστικά. */
+    @Volatile private var gateOpened = 0
+    @Volatile private var gateClosed = 0
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -147,6 +158,7 @@ class VoiceService : Service() {
         try { ws?.close(1000, "τέλος") } catch (e: Throwable) { }
         try { recorder?.stop(); recorder?.release() } catch (e: Throwable) { }
         try { track?.stop(); track?.release() } catch (e: Throwable) { }
+        abandonFocus()
         Voice.reset()
         Voice.status = "ανενεργή"
         note("φωνή", "η υπηρεσία σταμάτησε")
@@ -398,7 +410,40 @@ class VoiceService : Service() {
                 val mrms = sqrt(sum / n).toFloat()
                 Voice.noteMic(mrms)
                 if (mrms < 1e-5f) silent++ else silent = 0
-                if (silent == 100) note("φωνή", "το μικρόφωνο δίνει σιωπή — το πήρε άλλος;")
+                if (silent == 300) note("μικρόφωνο", "σιωπή 30 δευτερολέπτων — το πήρε άλλος;")
+
+                // ΚΑΤΑΣΤΟΛΗ ΗΧΟΥΣ.
+                //
+                // Η ακύρωση ηχούς του κινητού ακυρώνει ό,τι παίζει ΤΟ ΚΙΝΗΤΟ.
+                // Εδώ ο ήχος βγαίνει από τα ηχεία του αυτοκινήτου μέσω της
+                // προβολής, οπότε δεν τον βλέπει καθόλου — και ο ΑΙΑΣ ακούει
+                // τον εαυτό του. Το αποτέλεσμα δεν είναι μόνο ότι κόβεται:
+                // η φωνή του γίνεται «λόγος του χρήστη», απομαγνητοφωνείται
+                // στραβά, και μετά από ώρα συνομιλίας με τον εαυτό του τα
+                // ελληνικά του διαλύονται και αρχίζει να απαγγέλλει κομμάτια
+                // των οδηγιών του.
+                //
+                // Η πύλη μαθαίνει μόνη της πόσο δυνατή είναι η ηχώ: όσο μιλάει
+                // ο ΑΙΑΣ, ό,τι δεν περνάει το κατώφλι θεωρείται ηχώ και ανεβάζει
+                // την αναφορά. Ό,τι είναι σαφώς δυνατότερο —ο οδηγός που μιλάει
+                // από κοντά— περνάει κανονικά, άρα **η διακοπή με τη φωνή
+                // εξακολουθεί να δουλεύει**. Γι' αυτό και προτιμήθηκε από το
+                // να κλείνει απλώς το μικρόφωνο.
+                val speaking = Voice.mode == "speak"
+                var send = true
+                if (speaking) {
+                    if (mrms > echoRef * 2.0f + 0.012f) {
+                        gateOpened++
+                    } else {
+                        echoRef = max(mrms, echoRef * 0.995f)
+                        send = false
+                        gateClosed++
+                    }
+                } else {
+                    echoRef *= 0.999f
+                }
+                if (!send) java.util.Arrays.fill(bytes, 0, n * 2, 0)
+
                 val b64 = Base64.encodeToString(bytes, 0, n * 2, Base64.NO_WRAP)
                 try {
                     ws?.send(JSONObject().put("user_audio_chunk", b64).toString())
@@ -409,15 +454,89 @@ class VoiceService : Service() {
 
     // ------------------------------------------------------------ ηχεία
 
+    /**
+     * Τα χαρακτηριστικά του ήχου μας. **Καθοδήγηση πλοήγησης**, όχι «βοηθός».
+     *
+     * Ήταν `USAGE_ASSISTANT` και δεν ακουγόταν τίποτα — ούτε στον εξομοιωτή
+     * ούτε στο αυτοκίνητο. Δύο λόγοι, και οι δύο διορθώνονται εδώ.
+     *
+     * Πρώτος: το κανάλι του «βοηθού» στο Android Auto το κρατάει ο Βοηθός της
+     * Google. Εμείς είμαστε δηλωμένοι **εφαρμογή πλοήγησης** — η κατηγορία που
+     * μας δίνει και την επιφάνεια σχεδίασης — και το κανάλι της καθοδήγησης
+     * είναι ακριβώς αυτό που κάθε αυτοκίνητο ξέρει να παίζει και να χαμηλώνει
+     * τη μουσική από πάνω του. Η φωνή του ΑΙΑΝΤΑ είναι, από τη σκοπιά του
+     * host, οδηγία πλοήγησης.
+     *
+     * Δεύτερος: δες την [requestFocus].
+     */
+    private val outAttrs: AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
+    private var focusRequest: Any? = null
+    @Volatile private var hasFocus = false
+
+    /**
+     * Ζητά την εστίαση ήχου πριν μιλήσει.
+     *
+     * **Δεν τη ζητούσαμε ποτέ.** Αυτό ήταν αρκετό για να μην ακουστεί τίποτα:
+     * στο αυτοκίνητο ο host δεν ανοίγει κανάλι προς τα ηχεία για ροή που δεν
+     * έχει εστίαση, όσο σωστά κι αν δρομολογείται. Και η δρομολόγηση ΗΤΑΝ
+     * σωστή — το διαγνωστικό έγραφε «προβολή στο αυτοκίνητο» — γι' αυτό και
+     * κόντεψε να με παραπλανήσει: ο ήχος έφευγε κανονικά προς το Android Auto,
+     * απλώς δεν είχε άδεια να βγει από την άλλη μεριά.
+     *
+     * `TRANSIENT_MAY_DUCK` και όχι μόνιμη: ο ΑΙΑΣ μιλάει σε ριπές. Χαμηλώνει
+     * τη μουσική όσο μιλάει και την αφήνει να επανέλθει μόλις σωπάσει, αντί
+     * να την κρατά πνιγμένη για όλη τη διαδρομή.
+     */
+    private fun requestFocus() {
+        if (hasFocus) return
+        val am = getSystemService(AudioManager::class.java) ?: return
+        val ok = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val r = AudioFocusRequest.Builder(
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(outAttrs)
+                    .setWillPauseWhenDucked(false)
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                focusRequest = r
+                am.requestAudioFocus(r) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(null, AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK) ==
+                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
+        } catch (e: Throwable) { false }
+        hasFocus = ok
+        note("ήχος", "${Voice.route} · $outRate Hz · εστίαση " +
+            if (ok) "εγκρίθηκε" else "ΑΠΟΡΡΙΦΘΗΚΕ")
+    }
+
+    private fun abandonFocus() {
+        if (!hasFocus) return
+        hasFocus = false
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                (focusRequest as? AudioFocusRequest)
+                    ?.let { am.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
+        } catch (e: Throwable) { }
+    }
+
     private fun openTrack() {
         try { track?.release() } catch (e: Throwable) { }
         val min = AudioTrack.getMinBufferSize(
             outRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build())
+            .setAudioAttributes(outAttrs)
             .setAudioFormat(AudioFormat.Builder()
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setSampleRate(outRate)
@@ -463,7 +582,8 @@ class VoiceService : Service() {
                 else -> "τύπος ${d.type}"
             }
             Voice.route = name
-            note("ήχος", "$name · $outRate Hz")
+            note("ήχος", "$name · $outRate Hz · εστίαση " +
+                (if (hasFocus) "εγκρίθηκε" else "δεν ζητήθηκε ακόμη"))
         }, "aias-route").start()
     }
 
@@ -527,6 +647,10 @@ class VoiceService : Service() {
         Thread({
             while (running) {
                 val pcm = playQueue.poll(120, TimeUnit.MILLISECONDS) ?: continue
+                // Η εστίαση ζητιέται ΕΔΩ, πριν γραφτεί το πρώτο δείγμα — όχι στον
+                // μετρητή, που θα το καταλάβαινε ένα καρέ αργότερα και θα έκοβε
+                // την αρχή της πρώτης λέξης.
+                requestFocus()
                 fillEnvelope(pcm)
                 try { track?.write(pcm, 0, pcm.size) } catch (e: Throwable) { }
             }
@@ -598,13 +722,44 @@ class VoiceService : Service() {
                     Voice.noteRaw(norm.toFloat())
                     Voice.level = norm.pow(0.75).toFloat()
                     Voice.mode = "speak"
+                    quietSince = 0L
                 } else {
                     // Σβήσιμο με τον χρόνο: 120 ms σταθερά, ίδιο σε κάθε ρυθμό.
                     Voice.level *= exp(-dt / 0.12).toFloat()
                     if (Voice.level < 0.004f) Voice.level = 0f
                     if (Voice.mode == "speak") Voice.mode = "listen"
+
+                    // Η εστίαση κρατιέται ενάμισι δευτερόλεπτο μετά τη σιωπή.
+                    //
+                    // Με άμεση παράδοση, ο εξομοιωτής έγραφε «Audio stream
+                    // close, buffered = 1024»: έκλεινε το κανάλι με δείγματα
+                    // ακόμη μέσα, δηλαδή έτρωγε την ουρά της τελευταίας λέξης,
+                    // και το άνοιγε πάλι στην επόμενη πρόταση. Ο λόγος μιλάει
+                    // σε ριπές με κενά — δεν έχει νόημα να γυρίζει το κανάλι
+                    // μαζί τους.
+                    if (quietSince == 0L) quietSince = now
+                    else if (now - quietSince > 1_500_000_000L) abandonFocus()
                 }
                 Voice.note(Voice.level)
+
+                // Μία φορά το δευτερόλεπτο, το εύρος στα διαγνωστικά.
+                //
+                // Γραφόταν από τη [VizActivity], που τρέχει μόνο όταν κοιτάς
+                // τις τελείες στο κινητό — δηλαδή **ποτέ στο αυτοκίνητο**.
+                // Εκεί ζωγραφίζει ο [SurfaceRenderer] και η γραμμή δεν
+                // ενημερωνόταν καθόλου: γυρνώντας από τη διαδρομή θα βλέπαμε
+                // τιμές από την τελευταία δοκιμή στο σπίτι και θα τις
+                // περνούσαμε για μετρήσεις του αυτοκινήτου. Ανήκει εδώ, στην
+                // υπηρεσία που παράγει τους αριθμούς, όχι σε μια οθόνη.
+                if (System.nanoTime() - diagMark > 1_000_000_000L) {
+                    diagMark = System.nanoTime()
+                    note("στάθμη", "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s".format(
+                        Voice.lo, Voice.hi, Voice.mode, Voice.micHi,
+                        Voice.histLine(), Voice.extLine()))
+                    note("μικρόφωνο", "ηχώ %.4f · πέρασαν %d · κόπηκαν %d".format(
+                        echoRef, gateOpened, gateClosed))
+                    Voice.rollWindow()
+                }
             }
         }, "aias-level").start()
     }
