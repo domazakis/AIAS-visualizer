@@ -10,10 +10,24 @@ plugins {
  * Το repo είναι δημόσιο: όποιος βρει το ID μπορεί να μιλάει στον agent και να
  * καίει τα λεπτά του κατόχου. Δες το `local.properties.example`.
  */
-val agentId: String = Properties().apply {
+val local = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
-}.getProperty("aias.agentId", "")
+}
+
+val agentId: String = local.getProperty("aias.agentId", "")
+
+/**
+ * Το κλειδί ανεβάσματος. Ζει μόνο στο `local.properties` και στο
+ * `upload-keystore.jks`, και τα δύο στο .gitignore.
+ *
+ * Είναι **κλειδί ανεβάσματος**, όχι το κλειδί υπογραφής της εφαρμογής: με το
+ * Play App Signing η Google κρατάει το πραγματικό και υπογράφει η ίδια ό,τι
+ * φτάνει στις συσκευές. Αν χαθεί αυτό εδώ, ζητάς επαναφορά από την κονσόλα
+ * και ανεβάζεις καινούργιο — δεν χάνεται η εφαρμογή. Αν έλειπε το Play App
+ * Signing, η απώλεια θα σήμαινε ότι δεν ξαναβγαίνει ποτέ ενημέρωση.
+ */
+val storeFileName: String? = local.getProperty("aias.storeFile")
 
 android {
     namespace = "gr.aias.carviz"
@@ -22,17 +36,37 @@ android {
     defaultConfig {
         applicationId = "gr.aias.carviz"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 22
-        versionName = "0.22-echo"
+        targetSdk = 35
+        versionCode = 23
+        versionName = "0.23"
         buildConfigField("String", "AGENT_ID", "\"$agentId\"")
     }
 
     buildFeatures { buildConfig = true }
 
+    signingConfigs {
+        if (storeFileName != null) {
+            create("upload") {
+                storeFile = rootProject.file(storeFileName)
+                storePassword = local.getProperty("aias.storePassword")
+                keyAlias = local.getProperty("aias.keyAlias")
+                keyPassword = local.getProperty("aias.keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+        }
+        release {
+            // Χωρίς συρρίκνωση, προς το παρόν. Ο κώδικας είναι μικρός και η
+            // Car App Library θέλει κανόνες διατήρησης· δεν αξίζει να μπει
+            // ρίσκο ανάμεσα σε εμάς και το πρώτο ανέβασμα.
+            isMinifyEnabled = false
+            if (storeFileName != null) {
+                signingConfig = signingConfigs.getByName("upload")
+            }
         }
     }
 

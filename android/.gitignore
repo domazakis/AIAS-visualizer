@@ -4,3 +4,8 @@ local.properties
 *.iml
 .idea/
 .cxx/
+
+# Το κλειδί υπογραφής δεν μπαίνει ΠΟΤΕ στο repo.
+upload-keystore.jks
+*.jks
+*.keystore
