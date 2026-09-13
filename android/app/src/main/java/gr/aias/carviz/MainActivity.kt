@@ -72,6 +72,11 @@ class MainActivity : AppCompatActivity() {
         }
         preview = pv
         voice = Button(this).apply {
+            // Η ετικέτα μπαίνει και εδώ, όχι μόνο στη [refresh]. Το κουμπί
+            // βρέθηκε **κενό** στο κινητό: όποιο μονοπάτι της [onResume]
+            // επιστρέφει νωρίς δεν περνάει από τη refresh, και το κουμπί έμενε
+            // χωρίς κείμενο. Ένα κουμπί χωρίς όνομα δεν είναι κουμπί.
+            text = "Ξεκίνα τη φωνή"
             setOnClickListener { toggleVoice() }
         }
         val viz = Button(this).apply {
@@ -116,7 +121,15 @@ class MainActivity : AppCompatActivity() {
     /** Ξαναδιαβάζονται σε κάθε εμφάνιση, ώστε να αρκεί ένα βγες-μπες. */
     override fun onResume() {
         super.onResume()
+        // Οι ειδικές λειτουργίες ΚΑΤΑΝΑΛΩΝΟΝΤΑΙ.
+        //
+        // Η Activity κρατάει για πάντα το Intent που την ξεκίνησε, και η
+        // onResume τρέχει σε κάθε εμφάνιση. Χωρίς το removeExtra, ένα και μόνο
+        // `--ez store true` καθήλωνε την εφαρμογή: κάθε άνοιγμα ξαναζωγράφιζε
+        // τα γραφικά και έδειχνε λίστα αρχείων αντί για διαγνωστικά, για
+        // πάντα. Έτσι βρέθηκε στο κινητό, με το μεσαίο κουμπί κενό.
         if (intent?.getBooleanExtra("store", false) == true) {
+            intent.removeExtra("store")
             tv.text = "Γραφικά καταστήματος…"
             Thread {
                 val out = Store.writeAll(this)
@@ -125,6 +138,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (intent?.getBooleanExtra("bench", false) == true) {
+            intent.removeExtra("bench")
             tv.text = "Μέτρηση σε εξέλιξη…"
             // Εκτός του νήματος διεπαφής: κρατάει μερικά δευτερόλεπτα.
             Thread {
