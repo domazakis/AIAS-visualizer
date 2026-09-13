@@ -116,6 +116,14 @@ class MainActivity : AppCompatActivity() {
     /** Ξαναδιαβάζονται σε κάθε εμφάνιση, ώστε να αρκεί ένα βγες-μπες. */
     override fun onResume() {
         super.onResume()
+        if (intent?.getBooleanExtra("store", false) == true) {
+            tv.text = "Γραφικά καταστήματος…"
+            Thread {
+                val out = Store.writeAll(this)
+                runOnUiThread { tv.text = out }
+            }.start()
+            return
+        }
         if (intent?.getBooleanExtra("bench", false) == true) {
             tv.text = "Μέτρηση σε εξέλιξη…"
             // Εκτός του νήματος διεπαφής: κρατάει μερικά δευτερόλεπτα.
