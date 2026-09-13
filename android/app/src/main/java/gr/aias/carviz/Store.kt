@@ -42,6 +42,15 @@ object Store {
         save(scene(1920, 1080, "speak", 0.30f, carBox), File(dir, "play-shot-2-soft.png"), out)
         save(scene(1920, 1080, "listen", 0f, carBox), File(dir, "play-shot-3-listen.png"), out)
 
+        // Οι δύο πραγματικές γεωμετρίες που έδωσε το MG σε διαχωρισμένη οθόνη,
+        // μετρημένες από τα διαγνωστικά. Μόνο για έλεγχο σύνθεσης.
+        save(scene(1785, 690, "speak", 0.6f, Rect(1188, 36, 1767, 654)),
+            File(dir, "check-split-right.png"), out)
+        save(scene(1785, 690, "speak", 0.6f, Rect(36, 132, 1119, 672)),
+            File(dir, "check-split-left.png"), out)
+        save(scene(1785, 690, "listen", 0f, Rect(1188, 36, 1767, 654)),
+            File(dir, "check-split-right-listen.png"), out)
+
         return out.toString()
     }
 
