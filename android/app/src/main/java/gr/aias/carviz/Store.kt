@@ -30,10 +30,17 @@ object Store {
         val dir = ctx.filesDir
 
         save(icon(512), File(dir, "play-icon-512.png"), out)
-        save(scene(1024, 500, "speak", 0.62f), File(dir, "play-feature-1024x500.png"), out)
-        save(scene(1920, 1080, "speak", 0.72f), File(dir, "play-shot-1-speak.png"), out)
-        save(scene(1920, 1080, "listen", 0f), File(dir, "play-shot-2-listen.png"), out)
-        save(scene(1785, 690, "speak", 0.45f), File(dir, "play-shot-3-car.png"), out)
+        save(feature(), File(dir, "play-feature-1024x500.png"), out)
+        // Τα στιγμιότυπα είναι 16:9, γιατί το Play δεν δέχεται αναλογία πάνω
+        // από 2:1 — και η οθόνη του αυτοκινήτου είναι 2,6:1. Οι τελείες όμως
+        // μπαίνουν σε πλαίσιο με τις αναλογίες ΤΟΥ ΑΥΤΟΚΙΝΗΤΟΥ, με μαύρο πάνω
+        // και κάτω. Χωρίς αυτό, στο 16:9 η διάταξη περιορίζεται από το ύψος
+        // και βγάζει πέντε τεράστιους κύκλους που δεν μοιάζουν καθόλου με ό,τι
+        // βλέπει ο οδηγός.
+        val carBox = Rect(120, 290, 1800, 790)
+        save(scene(1920, 1080, "speak", 0.72f, carBox), File(dir, "play-shot-1-speak.png"), out)
+        save(scene(1920, 1080, "speak", 0.30f, carBox), File(dir, "play-shot-2-soft.png"), out)
+        save(scene(1920, 1080, "listen", 0f, carBox), File(dir, "play-shot-3-listen.png"), out)
 
         return out.toString()
     }
@@ -79,6 +86,41 @@ object Store {
     }
 
     /**
+     * Το γραφικό προβολής: οι τελείες με αέρα γύρω τους, και το όνομα από κάτω.
+     *
+     * Η πρώτη εκδοχή ήταν σκέτη σκηνή στο 1024×500 και οι τελείες έφταναν ως
+     * τις άκρες — βαριά και, χειρότερα, **ανώνυμη**. Στη σελίδα του
+     * καταστήματος το γραφικό είναι λωρίδα που τη βλέπει κανείς για ένα
+     * δευτερόλεπτο· χωρίς όνομα δεν λέει ποια εφαρμογή είναι.
+     */
+    private fun feature(): Bitmap {
+        val w = 1024; val h = 500
+        // Η σκηνή ζωγραφίζεται σε ΠΛΗΡΕΣ μέγεθος, με τις τελείες σε μικρότερο
+        // πλαίσιο μέσα της.
+        //
+        // Η προφανής εκδοχή —μικρό bitmap τοποθετημένο στο κέντρο— άφηνε ορατό
+        // ορθογώνιο. Η λάμψη δεν σταματά στις τελείες: απλώνεται σε ολόκληρο
+        // τον καμβά σαν ελάχιστα φωτισμένο πέπλο, οπότε το μικρό bitmap είχε
+        // αισθητά διαφορετικό μαύρο από το φόντο και κολλούσε σαν πλακάκι.
+        // Με πλήρες μέγεθος το πέπλο καλύπτει τα πάντα και δεν υπάρχει άκρη.
+        val bmp = scene(w, h, "speak", 0.62f, Rect(232, 30, 792, 330))
+        val cv = Canvas(bmp)
+
+        val t = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(255, 198, 95)
+            textSize = 76f
+            textAlign = Paint.Align.CENTER
+            letterSpacing = 0.34f
+            typeface = android.graphics.Typeface.create(
+                android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.NORMAL)
+        }
+        // Το letterSpacing μετράει και μετά το τελευταίο γράμμα· χωρίς τη μισή
+        // διόρθωση η λέξη κάθεται αισθητά αριστερά του κέντρου.
+        cv.drawText("ΑΙΑΣ", w / 2f + t.textSize * t.letterSpacing / 2f, 432f, t)
+        return bmp
+    }
+
+    /**
      * Μια σκηνή του renderer σε δοσμένο μέγεθος.
      *
      * Τα εξήντα καρέ δεν είναι αυθαίρετα: η λάμψη χτίζεται σε πυραμίδα και η
@@ -86,14 +128,17 @@ object Store {
      * αποτύπωναν τη μεταβατική κατάσταση, που δεν είναι αυτό που βλέπει ο
      * χρήστης.
      */
-    private fun scene(w: Int, h: Int, mode: String, level: Float): Bitmap {
+    private fun scene(
+        w: Int, h: Int, mode: String, level: Float, box: Rect? = null
+    ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val cv = Canvas(bmp)
         cv.drawColor(BG)
         val bars = Bars()
         bars.mode = mode
         bars.level = level
-        repeat(60) { bars.frame(cv, 0.016f, w, h, Rect(0, 0, w, h)) }
+        val b = box ?: Rect(0, 0, w, h)
+        repeat(60) { bars.frame(cv, 0.016f, w, h, b) }
         bars.release()
         return bmp
     }
