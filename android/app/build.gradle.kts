@@ -31,14 +31,14 @@ val storeFileName: String? = local.getProperty("aias.storeFile")
 
 android {
     namespace = "gr.aias.carviz"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "gr.aias.carviz"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 25
-        versionName = "0.25"
+        targetSdk = 36
+        versionCode = 26
+        versionName = "0.26"
         buildConfigField("String", "AGENT_ID", "\"$agentId\"")
     }
 
