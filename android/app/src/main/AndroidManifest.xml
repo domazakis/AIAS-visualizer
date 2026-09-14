@@ -6,9 +6,24 @@
     <uses-feature
         android:name="android.software.car.templates_host"
         android:required="true" />
-    <uses-feature
-        android:name="android.hardware.type.automotive"
-        android:required="false" />
+
+    <!-- ΔΕΝ δηλώνεται το `android.hardware.type.automotive`.
+         =================================================
+         Υπήρχε εδώ με `required="false"`, ως αβλαβής δήλωση «παίζει και σε
+         αυτοκίνητα». Δεν είναι αβλαβής: το Play απορρίπτει το ανέβασμα με
+         «δεν μπορεί να δηλώσει τη λειτουργία automotive και τα μεταδεδομένα
+         com.google.android.gms.car.application ταυτόχρονα».
+
+         Και έχει δίκιο, γιατί τα δύο είναι ΔΙΑΦΟΡΕΤΙΚΑ ΠΕΡΙΒΑΛΛΟΝΤΑ:
+
+         · `android.hardware.type.automotive` σημαίνει Android Automotive OS —
+            λειτουργικό ΜΕΣΑ στο αυτοκίνητο, η εφαρμογή τρέχει στο ίδιο το
+            όχημα, χωρίς κινητό.
+         · τα μεταδεδομένα `com.google.android.gms.car.application` σημαίνουν
+            Android Auto — προβολή ΑΠΟ το κινητό στην οθόνη του αυτοκινήτου.
+
+         Εμείς είμαστε αποκλειστικά το δεύτερο: ολόκληρη η αρχιτεκτονική
+         στηρίζεται σε υπηρεσία που τρέχει στο κινητό. Η δήλωση έφυγε. -->
 
     <!-- Η κατηγορία πλοήγησης είναι η μόνη που δίνει ελεύθερη επιφάνεια
          σχεδίασης. Η ACCESS_SURFACE είναι αυτή που την ξεκλειδώνει. -->
