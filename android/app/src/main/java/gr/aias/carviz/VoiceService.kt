@@ -102,6 +102,11 @@ class VoiceService : Service() {
     private var lastHeadMoveAt = 0L
     /** Πόσα κομμάτια μικροφώνου σιγήθηκαν επειδή μιλούσε ο ΑΙΑΣ. */
     @Volatile private var gateClosed = 0
+    /** Μετρητές της διαδρομής μικρόφωνο → δίκτυο, για να μη χάνεται τίποτα σιωπηλά. */
+    @Volatile private var reads = 0
+    @Volatile private var readFails = 0
+    @Volatile private var sent = 0
+    @Volatile private var sendFails = 0
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -394,7 +399,16 @@ class VoiceService : Service() {
             var silent = 0
             while (running) {
                 val n = rec.read(chunk, 0, chunk.size)
-                if (n <= 0) continue
+                // ΚΑΘΕ ΑΠΟΤΥΧΙΑ ΜΕΤΡΙΕΤΑΙ.
+                //
+                // Στο S24 έφτασαν στον server μόνο 36,6 από τα 171 δευτερόλεπτα
+                // της κλήσης. Τα 134 που λείπουν δεν εξηγούνται από την πύλη —
+                // εκείνη έκλεινε μόνο όσο μιλούσε ο ΑΙΑΣ, δηλαδή 15 δευτερόλεπτα,
+                // και ακόμη και τότε στέλναμε σιωπή, που μετριέται κανονικά.
+                // Άρα κάτι άλλο σταμάτησε να στέλνει, και το καταπίναμε χωρίς
+                // ίχνος: το `continue` εδώ και το `catch` της αποστολής.
+                if (n <= 0) { readFails++; continue }
+                reads++
                 var j = 0
                 var sum = 0.0
                 for (i in 0 until n) {
@@ -460,8 +474,11 @@ class VoiceService : Service() {
 
                 val b64 = Base64.encodeToString(bytes, 0, n * 2, Base64.NO_WRAP)
                 try {
-                    ws?.send(JSONObject().put("user_audio_chunk", b64).toString())
-                } catch (e: Throwable) { }
+                    val w = ws
+                    if (w == null) sendFails++
+                    else if (w.send(JSONObject().put("user_audio_chunk", b64).toString())) sent++
+                    else sendFails++
+                } catch (e: Throwable) { sendFails++ }
             }
         }, "aias-mic").start()
     }
@@ -795,8 +812,9 @@ class VoiceService : Service() {
                     note("στάθμη", "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s".format(
                         Voice.lo, Voice.hi, Voice.mode, Voice.micHi,
                         Voice.histLine(), Voice.extLine()))
-                    note("μικρόφωνο", "κλειστό σε %d κομμάτια · κορυφή %.4f".format(
-                        gateClosed, Voice.micHi))
+                    note("μικρόφωνο",
+                        "διαβ %d/απέτ %d · εστ %d/απέτ %d · σιγή %d · κορ %.4f".format(
+                            reads, readFails, sent, sendFails, gateClosed, Voice.micHi))
                     Voice.rollWindow()
                 }
             }
