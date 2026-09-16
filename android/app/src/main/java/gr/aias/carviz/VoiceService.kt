@@ -97,10 +97,10 @@ class VoiceService : Service() {
     private var diagMark = 0L
     /** Από πότε κρατάει η σιωπή — για την καθυστερημένη παράδοση εστίασης. */
     private var quietSince = 0L
-    /** Η μαθημένη στάθμη της ηχούς στο μικρόφωνο, όσο μιλάει ο ΑΙΑΣ. */
-    @Volatile private var echoRef = 0f
-    /** Πόσα κομμάτια πέρασαν και πόσα κόπηκαν — μπαίνουν στα διαγνωστικά. */
-    @Volatile private var gateOpened = 0
+    /** Τελευταία θέση κεφαλής και πότε κουνήθηκε — ανίχνευση παγώματος. */
+    private var lastHead = -1L
+    private var lastHeadMoveAt = 0L
+    /** Πόσα κομμάτια μικροφώνου σιγήθηκαν επειδή μιλούσε ο ΑΙΑΣ. */
     @Volatile private var gateClosed = 0
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
@@ -429,36 +429,34 @@ class VoiceService : Service() {
                 // από κοντά— περνάει κανονικά, άρα **η διακοπή με τη φωνή
                 // εξακολουθεί να δουλεύει**. Γι' αυτό και προτιμήθηκε από το
                 // να κλείνει απλώς το μικρόφωνο.
-                val speaking = Voice.mode == "speak"
-                var send = true
-                if (speaking) {
-                    // ΤΟ ΚΑΤΩΦΛΙ ΧΑΛΑΡΩΣΕ ΔΡΑΣΤΙΚΑ.
-                    //
-                    // Ήταν `ηχώ · 2.0 + 0.012`. Με μετρημένη ηχώ 0,0184 στην
-                    // καμπίνα του MG, αυτό έβγαζε όριο 0,049 — και ο οδηγός
-                    // έπρεπε κυριολεκτικά να ουρλιάζει για να περάσει. Στην
-                    // πραγματική διαδρομή πέρασαν 3 κομμάτια και κόπηκαν 639.
-                    //
-                    // Η πύλη πρέπει να κόβει την ηχώ, όχι τον άνθρωπο. Με
-                    // `1.15 + 0.002` το όριο πέφτει γύρω στο 0,023: λίγο πάνω
-                    // από την ηχώ, πολύ κάτω από κανονική ομιλία.
-                    //
-                    // Το ρίσκο —να ξαναπεράσει λίγη ηχώ— είναι μικρότερο απ'
-                    // ό,τι ήταν, γιατί η κύρια αιτία της κατάρρευσης εκείνης
-                    // της μισής ώρας ήταν ο χρόνος σιωπής των δεκαπέντε
-                    // δευτερολέπτων στον agent, που τον έβαζε να μιλάει μόνος
-                    // του. Δες το AGENT.md.
-                    if (mrms > echoRef * 1.15f + 0.002f) {
-                        gateOpened++
-                    } else {
-                        echoRef = max(mrms, echoRef * 0.995f)
-                        send = false
-                        gateClosed++
-                    }
-                } else {
-                    echoRef *= 0.999f
+                // ΣΙΩΠΗ ΟΣΟ ΜΙΛΑΕΙ. ΧΩΡΙΣ ΚΑΤΩΦΛΙ.
+                //
+                // Το κατώφλι στάθμης ήταν λάθος σχεδίασης, όχι λάθος νούμερο.
+                // Δεν υπάρχει τιμή που να ξεχωρίζει τον οδηγό από την ηχώ, γιατί
+                // η ηχώ μεγαλώνει με την ένταση των ηχείων: χαμηλά περνούσε
+                // σωστά, δυνατά η ίδια του η φωνή ξεπερνούσε κάθε όριο.
+                //
+                // Η απομαγνητοφώνηση της διαδρομής το δείχνει ωμά — ο «χρήστης»
+                // επαναλαμβάνει τα λόγια του agent ένα δευτερόλεπτο αργότερα:
+                //
+                //     42s agent  Το σχολείο δημιουργεί...
+                //     43s user   Το σχολείο δημιουργεί δύο...
+                //    175s agent  Σωστά
+                //    176s user   Σωστά
+                //    204s agent  Ναι
+                //    205s user   Ναι
+                //
+                // Μιλούσε στον εαυτό του, κοβόταν από τον εαυτό του, και το
+                // σύστημα τιτλοφόρησε μόνο του τη συνεδρία «Echo Test».
+                //
+                // Το τίμημα είναι ότι χάνεται η διακοπή με τη φωνή: δεν μπορείς
+                // να τον κόψεις μιλώντας πάνω του. Αλλά ως τώρα δεν μπορούσες
+                // ούτε να του μιλήσεις, οπότε η ανταλλαγή είναι εύκολη.
+                if (System.nanoTime() < Voice.micMuteUntil) {
+                    gateClosed++
+                    java.util.Arrays.fill(bytes, 0, n * 2, 0)
                 }
-                if (!send) java.util.Arrays.fill(bytes, 0, n * 2, 0)
+
 
                 val b64 = Base64.encodeToString(bytes, 0, n * 2, Base64.NO_WRAP)
                 try {
@@ -698,12 +696,35 @@ class VoiceService : Service() {
                     t.playbackHeadPosition.toLong() and 0xFFFFFFFFL
                 } catch (e: Throwable) { 0L }
 
+                // ΑΝΙΧΝΕΥΣΗ ΚΟΛΛΗΜΕΝΗΣ ΚΕΦΑΛΗΣ.
+                //
+                // Η κατάσταση «μιλάει» βγαίνει από το `γραμμένα − κεφαλή`. Αν η
+                // κεφαλή σταματήσει να προχωράει ενώ υπάρχει υπόλοιπο — χαμένη
+                // εστίαση, παγωμένο AudioTrack — η διαφορά μένει θετική **για
+                // πάντα** και ο ΑΙΑΣ θεωρεί ότι μιλάει αιώνια. Με κλειστό
+                // μικρόφωνο όσο μιλάει, αυτό σημαίνει ότι δεν ξανακούει ποτέ.
+                //
+                // Έτσι ακριβώς χάθηκαν ενενήντα πέντε δευτερόλεπτα στο S24:
+                // από τα 171 δευτερόλεπτα της κλήσης, μόνο 36 έφτασαν στην
+                // απομαγνητοφώνηση. Ο χρήστης μιλούσε σε τοίχο.
+                if (head != lastHead) { lastHead = head; lastHeadMoveAt = now }
+                val stalled = lastHeadMoveAt != 0L &&
+                    now - lastHeadMoveAt > 1_500_000_000L
+
                 var e = 0f
                 var speaking = false
                 synchronized(env) {
                     // Το υπόλοιπο στον απομονωτή: όσο είναι θετικό, ακούγεται.
                     val pending = written - head
-                    speaking = pending > envHop / 2
+                    speaking = pending > envHop / 2 && !stalled
+                    if (stalled && pending > 0) {
+                        // Η ροή πάγωσε: καθαρίζουμε, ώστε να μη μείνει το
+                        // υπόλοιπο να δηλώνει ομιλία που δεν ακούγεται.
+                        playQueue.clear()
+                        envWrite = 0; envAcc = 0.0; envCount = 0; written = 0L
+                        lastHeadMoveAt = now
+                        note("φωνή", "η ροή ήχου πάγωσε — καθαρίστηκε")
+                    }
                     val idx = (head / envHop).toInt()
                     if (idx in 0 until envWrite && envWrite - idx <= ENV_SIZE) {
                         e = env[idx % ENV_SIZE]
@@ -739,6 +760,8 @@ class VoiceService : Service() {
                     Voice.level = norm.pow(0.75).toFloat()
                     Voice.mode = "speak"
                     quietSince = 0L
+                    // Το μικρόφωνο μένει κλειστό όσο μιλάει, συν μια ουρά.
+                    Voice.micMuteUntil = now + 250_000_000L
                 } else {
                     // Σβήσιμο με τον χρόνο: 120 ms σταθερά, ίδιο σε κάθε ρυθμό.
                     Voice.level *= exp(-dt / 0.12).toFloat()
@@ -772,8 +795,8 @@ class VoiceService : Service() {
                     note("στάθμη", "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s".format(
                         Voice.lo, Voice.hi, Voice.mode, Voice.micHi,
                         Voice.histLine(), Voice.extLine()))
-                    note("μικρόφωνο", "ηχώ %.4f · πέρασαν %d · κόπηκαν %d".format(
-                        echoRef, gateOpened, gateClosed))
+                    note("μικρόφωνο", "κλειστό σε %d κομμάτια · κορυφή %.4f".format(
+                        gateClosed, Voice.micHi))
                     Voice.rollWindow()
                 }
             }
