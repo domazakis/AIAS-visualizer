@@ -150,6 +150,8 @@ class VoiceService : Service() {
         Voice.active = true
         note("φωνή", "η υπηρεσία ξεκίνησε")
         routeToPhone()
+        val rec = Rec.start(this)
+        note("εγγραφή", rec?.substringAfterLast('/') ?: "δεν ξεκίνησε")
         connect()
         startCapture()
         startPlayback()
@@ -164,6 +166,7 @@ class VoiceService : Service() {
         try { track?.stop(); track?.release() } catch (e: Throwable) { }
         abandonFocus()
         releasePhoneRoute()
+        Rec.stop()
         Voice.reset()
         Voice.status = "ανενεργή"
         note("φωνή", "η υπηρεσία σταμάτησε")
@@ -409,6 +412,7 @@ class VoiceService : Service() {
                 // ίχνος: το `continue` εδώ και το `catch` της αποστολής.
                 if (n <= 0) { readFails++; continue }
                 reads++
+                Rec.writeMic(chunk, n)
                 var j = 0
                 var sum = 0.0
                 for (i in 0 until n) {
@@ -728,6 +732,7 @@ class VoiceService : Service() {
                 // μετρητή, που θα το καταλάβαινε ένα καρέ αργότερα και θα έκοβε
                 // την αρχή της πρώτης λέξης.
                 requestFocus()
+                Rec.pushAgent(pcm)
                 fillEnvelope(pcm)
                 try { track?.write(pcm, 0, pcm.size) } catch (e: Throwable) { }
             }
@@ -859,6 +864,8 @@ class VoiceService : Service() {
                     note("μικρόφωνο",
                         "διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f".format(
                             reads, readFails, sent, sendFails, Voice.micHi))
+                    note("εγγραφή", "%s · %s".format(
+                        Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
                 }
             }
