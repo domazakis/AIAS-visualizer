@@ -151,6 +151,7 @@ class VoiceService : Service() {
         startForegroundNotice()
         Voice.active = true
         note("φωνή", "η υπηρεσία ξεκίνησε")
+        routeToPhone()
         connect()
         startCapture()
         startPlayback()
@@ -164,6 +165,7 @@ class VoiceService : Service() {
         try { recorder?.stop(); recorder?.release() } catch (e: Throwable) { }
         try { track?.stop(); track?.release() } catch (e: Throwable) { }
         abandonFocus()
+        releasePhoneRoute()
         Voice.reset()
         Voice.status = "ανενεργή"
         note("φωνή", "η υπηρεσία σταμάτησε")
@@ -501,12 +503,69 @@ class VoiceService : Service() {
      * Δεύτερος: δες την [requestFocus].
      */
     private val outAttrs: AudioAttributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
 
     private var focusRequest: Any? = null
     @Volatile private var hasFocus = false
+
+    /**
+     * Ο ήχος μένει ΣΤΟ ΚΙΝΗΤΟ, και αυτό δεν είναι υποχώρηση.
+     *
+     * Ως τώρα η φωνή έφευγε στα ηχεία του αυτοκινήτου μέσω της προβολής. Εκεί
+     * το κινητό δεν ξαναβλέπει ποτέ το σήμα, άρα ο ακυρωτής ηχούς του δεν έχει
+     * **αναφορά** και δεν μπορεί να αφαιρέσει τίποτα: ο ΑΙΑΣ ακούει τον εαυτό
+     * του και κόβεται. Η παρατήρηση που το έλυσε ήταν του χρήστη — σε ανοιχτή
+     * ακρόαση στο κινητό δεν συμβαίνει ποτέ, στο αυτοκίνητο πάντα.
+     *
+     * Με χρήση `VOICE_COMMUNICATION` και στις δύο άκρες, η αναπαραγωγή γίνεται
+     * η αναφορά της εγγραφής: ο ακυρωτής ξέρει ακριβώς τι παίζει και το κόβει.
+     * Παράπλευρα, η προβολή δεν αρπάζει αυτό το κανάλι — είναι κανάλι κλήσης.
+     *
+     * Και ταιριάζει με τη χρήση: ακουστικό στο αυτί για τον οδηγό, ή ανοιχτή
+     * ακρόαση με ένταση που ελέγχεται από το κινητό. Στην οθόνη του
+     * αυτοκινήτου μένει αυτό που θέλαμε εξαρχής — οι τελείες.
+     */
+    private fun routeToPhone() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            @Suppress("DEPRECATION")
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+
+            // Αν υπάρχει ακουστικό, δεν επιβάλλουμε τίποτα: το σύστημα το
+            // προτιμά ήδη, και ο οδηγός το διάλεξε για κάποιον λόγο.
+            val wired = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+            }
+            if (wired) { note("ήχος", "ακουστικό — χωρίς επιβολή"); return }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val spk = am.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                }
+                if (spk != null) am.setCommunicationDevice(spk)
+            } else {
+                @Suppress("DEPRECATION")
+                am.isSpeakerphoneOn = true
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "δεν μπόρεσα να κρατήσω τον ήχο στο κινητό", e)
+        }
+    }
+
+    private fun releasePhoneRoute() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.clearCommunicationDevice()
+            else { @Suppress("DEPRECATION") am.isSpeakerphoneOn = false }
+            @Suppress("DEPRECATION")
+            am.mode = AudioManager.MODE_NORMAL
+        } catch (e: Throwable) { }
+    }
 
     /**
      * Ζητά την εστίαση ήχου πριν μιλήσει.

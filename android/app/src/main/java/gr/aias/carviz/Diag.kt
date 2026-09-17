@@ -39,6 +39,27 @@ object Diag {
             .putString(key, value)
             .putString("ενημέρωση", stamp())
             .apply()
+        mirror(context)
+    }
+
+    /**
+     * Αντίγραφο σε απλό κείμενο, στον εξωτερικό φάκελο της εφαρμογής.
+     *
+     * Δύο εβδομάδες τα διαγνωστικά διαβάζονταν με `run-as`. Από τη στιγμή που η
+     * εγκατάσταση έρχεται από το Play, το πακέτο είναι **release** και το
+     * `run-as` απαντά «package not debuggable» — το εργαλείο που έλυσε τα μισά
+     * μυστήρια αυτού του έργου έπαψε να υπάρχει ακριβώς όταν η εφαρμογή άρχισε
+     * να δουλεύει σωστά.
+     *
+     * Ο φάκελος `Android/data/gr.aias.carviz/files` διαβάζεται από το `adb`
+     * χωρίς καμία άδεια και σβήνεται με την απεγκατάσταση.
+     */
+    private fun mirror(context: Context) {
+        try {
+            val dir = context.getExternalFilesDir(null) ?: return
+            val body = read(context).joinToString("\n") { (k, v) -> "$k: $v" }
+            java.io.File(dir, "diag.txt").writeText(body + "\n")
+        } catch (e: Throwable) { }
     }
 
     /**
