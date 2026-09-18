@@ -51,6 +51,10 @@
          μικρόφωνο της Car App Library είναι για σύντομη είσοδο που ο host
          μπορεί να κόψει, άχρηστο για βοηθό που ακούει συνέχεια. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Χωρίς αυτήν το `setCommunicationDevice` πετάει SecurityException και ο
+         ήχος ΔΕΝ κρατιέται στο κινητό. Έλειπε ως την 0.34, και η αποτυχία
+         ήταν σιωπηλή γιατί το `catch` την κατάπινε. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

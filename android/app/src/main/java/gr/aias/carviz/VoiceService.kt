@@ -152,6 +152,7 @@ class VoiceService : Service() {
         note("φωνή", "η υπηρεσία ξεκίνησε")
         routeToPhone()
         watchDevices()
+        raiseCallVolume()
         val rec = Rec.start(this)
         note("εγγραφή", rec?.substringAfterLast('/') ?: "δεν ξεκίνησε")
         connect()
@@ -167,6 +168,7 @@ class VoiceService : Service() {
         try { recorder?.stop(); recorder?.release() } catch (e: Throwable) { }
         try { track?.stop(); track?.release() } catch (e: Throwable) { }
         abandonFocus()
+        restoreCallVolume()
         unwatchDevices()
         releasePhoneRoute()
         Rec.stop()
@@ -507,6 +509,9 @@ class VoiceService : Service() {
     /** Ο παρατηρητής συσκευών ήχου — δες [watchDevices]. */
     private var deviceWatcher: Any? = null
 
+    /** Η ένταση κλήσης πριν την πειράξουμε — δες [raiseCallVolume]. */
+    private var savedCallVolume = -1
+
     /**
      * Ο ήχος μένει ΣΤΟ ΚΙΝΗΤΟ, και αυτό δεν είναι υποχώρηση.
      *
@@ -560,7 +565,11 @@ class VoiceService : Service() {
                 am.isSpeakerphoneOn = true
             }
         } catch (e: Throwable) {
+            // ΚΑΙ ΣΤΑ ΔΙΑΓΝΩΣΤΙΚΑ, όχι μόνο στο logcat: στο αυτοκίνητο δεν
+            // υπάρχει logcat, και μια `SecurityException` εδώ σημαίνει ότι ο
+            // ήχος δεν κρατήθηκε ποτέ στο κινητό.
             Log.w(TAG, "δεν μπόρεσα να κρατήσω τον ήχο στο κινητό", e)
+            note("ήχος", "η δρομολόγηση απέτυχε: ${e.javaClass.simpleName}")
         }
     }
 
@@ -587,11 +596,56 @@ class VoiceService : Service() {
                     // «ήχος» έμενε από το άνοιγμα του καναλιού και έλεγε
                     // ψέματα για την υπόλοιπη διαδρομή.
                     track?.let { noteRoute(it) }
+                    raiseCallVolume()
                 }
             }
             deviceWatcher = cb
             am.registerAudioDeviceCallback(cb, null)
         } catch (e: Throwable) { }
+    }
+
+    /**
+     * Η ένταση της ΚΛΗΣΗΣ, που δεν είναι η ένταση που ανεβάζει ο οδηγός.
+     *
+     * Στις 18/09 δεν ακούστηκε ούτε λέξη, και ο λόγος ήταν αυτός ο αριθμός:
+     *
+     *     STREAM_VOICE_CALL … 80 (bt_a2dp): 1      (min 1, max 8)
+     *
+     * Ο ΑΙΑΣ παίζει ως `USAGE_VOICE_COMMUNICATION`, άρα στο κανάλι κλήσης.
+     * Στο Bluetooth του αυτοκινήτου το κανάλι αυτό ήταν στο **ένα στα οκτώ**,
+     * δηλαδή στο απόλυτο ελάχιστο. Και όταν ο οδηγός πάτησε ένταση, το
+     * σύστημα κούνησε το κανάλι **μουσικής** (`stream=3`, 0→6 και μετά 0→15),
+     * επειδή για εκείνο δεν υπήρχε ενεργή κλήση. Η φωνή έμεινε στο ένα.
+     *
+     * Δεν είναι κάτι που μπορεί να βρει ο χρήστης: η ένταση κλήσης ρυθμίζεται
+     * μόνο ΜΕΣΑ σε κλήση. Άρα τη σηκώνουμε εμείς και τη γυρνάμε πίσω στο
+     * τέλος. Η τιμή είναι ανά συσκευή εξόδου, γι' αυτό ξαναμπαίνει σε κάθε
+     * αλλαγή δρομολόγησης.
+     */
+    private fun raiseCallVolume() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            val cur = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            val want = max - max / 8
+            if (cur >= want) { note("ένταση", "κλήση $cur/$max — εντάξει"); return }
+            // Κρατάμε μόνο την πρώτη τιμή που βρήκαμε: αν τη σώζαμε ξανά σε
+            // κάθε αλλαγή, θα γυρνούσαμε πίσω τη δική μας.
+            if (savedCallVolume < 0) savedCallVolume = cur
+            am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, want, 0)
+            val got = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            note("ένταση", "κλήση $cur → $got (από $max)")
+        } catch (e: Throwable) {
+            note("ένταση", "δεν άλλαξε: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun restoreCallVolume() {
+        val v = savedCallVolume
+        savedCallVolume = -1
+        if (v < 0) return
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try { am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, v, 0) } catch (e: Throwable) { }
     }
 
     private fun unwatchDevices() {
