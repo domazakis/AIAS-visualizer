@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
@@ -96,7 +97,7 @@ class VoiceService : Service() {
     /** Πότε γράφτηκε τελευταία η γραμμή «στάθμη». */
     private var diagMark = 0L
     /** Από πότε κρατάει η σιωπή — για την καθυστερημένη παράδοση εστίασης. */
-    private var quietSince = 0L
+    @Volatile private var quietSince = 0L
     /** Τελευταία θέση κεφαλής και πότε κουνήθηκε — ανίχνευση παγώματος. */
     private var lastHead = -1L
     private var lastHeadMoveAt = 0L
@@ -150,6 +151,7 @@ class VoiceService : Service() {
         Voice.active = true
         note("φωνή", "η υπηρεσία ξεκίνησε")
         routeToPhone()
+        watchDevices()
         val rec = Rec.start(this)
         note("εγγραφή", rec?.substringAfterLast('/') ?: "δεν ξεκίνησε")
         connect()
@@ -165,6 +167,7 @@ class VoiceService : Service() {
         try { recorder?.stop(); recorder?.release() } catch (e: Throwable) { }
         try { track?.stop(); track?.release() } catch (e: Throwable) { }
         abandonFocus()
+        unwatchDevices()
         releasePhoneRoute()
         Rec.stop()
         Voice.reset()
@@ -501,6 +504,9 @@ class VoiceService : Service() {
     private var focusRequest: Any? = null
     @Volatile private var hasFocus = false
 
+    /** Ο παρατηρητής συσκευών ήχου — δες [watchDevices]. */
+    private var deviceWatcher: Any? = null
+
     /**
      * Ο ήχος μένει ΣΤΟ ΚΙΝΗΤΟ, και αυτό δεν είναι υποχώρηση.
      *
@@ -524,21 +530,31 @@ class VoiceService : Service() {
             @Suppress("DEPRECATION")
             am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-            // Αν υπάρχει ακουστικό, δεν επιβάλλουμε τίποτα: το σύστημα το
-            // προτιμά ήδη, και ο οδηγός το διάλεξε για κάποιον λόγο.
-            val wired = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            // ΤΟ BLUETOOTH ΤΟΥ ΑΥΤΟΚΙΝΗΤΟΥ ΔΕΝ ΕΙΝΑΙ ΑΚΟΥΣΤΙΚΟ.
+            //
+            // Εδώ ήταν και το `TYPE_BLUETOOTH_SCO`, με σκεπτικό «ο οδηγός
+            // διάλεξε ακουστικό, δεν του το χαλάμε». Στο αυτοκίνητο όμως το
+            // ίδιο το MG είναι ζευγαρωμένο ως hands-free: η εξαίρεση έπιανε
+            // ακριβώς τη μία περίπτωση που έπρεπε να αποφύγουμε, κι έτσι όλο
+            // το νόημα της έκδοσης 32 —ο ήχος να μένει στο κινητό— μπορούσε
+            // να ακυρωθεί από αυτή τη μία γραμμή.
+            //
+            // Ακουστικό είναι μόνο ό,τι μπαίνει με καλώδιο στο κινητό.
+            val headset = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
                 it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
                 it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                 it.type == AudioDeviceInfo.TYPE_USB_HEADSET
             }
-            if (wired) { note("ήχος", "ακουστικό — χωρίς επιβολή"); return }
+            if (headset) { note("ήχος", "ακουστικό — χωρίς επιβολή"); return }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val spk = am.availableCommunicationDevices.firstOrNull {
                     it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                 }
-                if (spk != null) am.setCommunicationDevice(spk)
+                // Η ΕΠΙΣΤΡΟΦΗ ΜΕΤΡΑΕΙ. Την αγνοούσαμε, κι έτσι μια αποτυχία
+                // δρομολόγησης ήταν ακριβώς τόσο σιωπηλή όσο μια επιτυχία.
+                val ok = spk != null && am.setCommunicationDevice(spk)
+                if (!ok) note("ήχος", "ΔΕΝ κρατήθηκε στο ηχείο του κινητού")
             } else {
                 @Suppress("DEPRECATION")
                 am.isSpeakerphoneOn = true
@@ -546,6 +562,45 @@ class VoiceService : Service() {
         } catch (e: Throwable) {
             Log.w(TAG, "δεν μπόρεσα να κρατήσω τον ήχο στο κινητό", e)
         }
+    }
+
+    /**
+     * Η δρομολόγηση ξαναμπαίνει σε ΚΑΘΕ αλλαγή συσκευών ήχου.
+     *
+     * Μία φορά στην εκκίνηση δεν αρκεί, και το πληρώσαμε ολόκληρη διαδρομή:
+     * στις 18/09 η υπηρεσία ξεκίνησε 19:40:17 και το Bluetooth του
+     * αυτοκινήτου συνδέθηκε 19:40:21 — τέσσερα δευτερόλεπτα αργότερα. Η
+     * [routeToPhone] είχε ήδη αποφασίσει σε έναν κόσμο χωρίς αυτοκίνητο, και
+     * ο ήχος μετακόμισε από κάτω της. Το διαγνωστικό το έγραψε καθαρά:
+     * «ήχος: Bluetooth (μουσική)», δηλαδή στα ηχεία του MG.
+     */
+    private fun watchDevices() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            val cb = object : AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) = recheck()
+                override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) = recheck()
+                private fun recheck() {
+                    if (!running) return
+                    routeToPhone()
+                    // Και ξαναμετράμε πού βγήκε τελικά — αλλιώς η γραμμή
+                    // «ήχος» έμενε από το άνοιγμα του καναλιού και έλεγε
+                    // ψέματα για την υπόλοιπη διαδρομή.
+                    track?.let { noteRoute(it) }
+                }
+            }
+            deviceWatcher = cb
+            am.registerAudioDeviceCallback(cb, null)
+        } catch (e: Throwable) { }
+    }
+
+    private fun unwatchDevices() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            (deviceWatcher as? AudioDeviceCallback)
+                ?.let { am.unregisterAudioDeviceCallback(it) }
+        } catch (e: Throwable) { }
+        deviceWatcher = null
     }
 
     private fun releasePhoneRoute() {
@@ -573,6 +628,14 @@ class VoiceService : Service() {
      * να την κρατά πνιγμένη για όλη τη διαδρομή.
      */
     private fun requestFocus() {
+        // Η ΣΙΩΠΗ ΤΕΛΕΙΩΣΕ ΤΩΡΑ, όχι όταν φτάσει ο ήχος στην κεφαλή.
+        //
+        // Χωρίς αυτή τη γραμμή ο μετρητής σιωπής κρατούσε την προηγούμενη
+        // παύση, και ο επόμενος κύκλος των 16 ms παρέδιδε την εστίαση **20
+        // χιλιοστά αφού μόλις τη ζητήσαμε** — πριν βγει ένα δείγμα. Μετρημένο
+        // στο αυτοκίνητο 18/09, τέσσερις φορές στη σειρά: 22,699→22,752 ·
+        // 22,981→23,000 · 23,997→24,015 · 24,833→24,841.
+        quietSince = 0L
         if (hasFocus) return
         val am = getSystemService(AudioManager::class.java) ?: return
         val ok = try {
