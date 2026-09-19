@@ -50,8 +50,8 @@ object Rec {
     private var rTail = 0
     private var rCount = 0
 
-    /** Ουρά προς τον δίσκο: εκατό καρέ, δέκα δευτερόλεπτα περιθώριο. */
-    private val queue = java.util.concurrent.ArrayBlockingQueue<ByteArray>(100)
+    /** Ουρά προς τον δίσκο: 250 καρέ των 40 ms, δέκα δευτερόλεπτα περιθώριο. */
+    private val queue = java.util.concurrent.ArrayBlockingQueue<ByteArray>(250)
     private var writer: Thread? = null
     @Volatile private var dropped = 0
 

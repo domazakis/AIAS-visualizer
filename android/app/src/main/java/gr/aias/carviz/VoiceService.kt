@@ -60,6 +60,20 @@ class VoiceService : Service() {
         /** Η είσοδος του agent είναι PCM 16 kHz, μονοφωνικό, 16 bit. */
         private const val IN_RATE = 16000
 
+        /**
+         * Πόσο κρατάμε την εστίαση ήχου μετά τη σιωπή.
+         *
+         * Ήταν ενάμισι δευτερόλεπτο, και το πληρώναμε δύο φορές. Πρώτον, η
+         * `requestAudioFocus` είναι κλήση προς άλλη διεργασία και έμπαινε στον
+         * κρίσιμο δρόμο της **πρώτης συλλαβής κάθε ατάκας**. Δεύτερον, με
+         * παύσεις 3,6 δευτερολέπτων ανάμεσα στις ατάκες, το ραδιόφωνο χαμήλωνε
+         * και ξαναδυνάμωνε σε κάθε γύρο — αντλία αντί για συνομιλία.
+         *
+         * Οκτώ δευτερόλεπτα σημαίνει ότι μέσα σε μια συνομιλία η εστίαση
+         * ζητιέται μία φορά και μετά υπάρχει ήδη.
+         */
+        private const val FOCUS_HOLD_NS = 8_000_000_000L
+
         /** Πόσα δείγματα καλύπτει μία τιμή της περιβάλλουσας: ~20 ms. */
         private const val ENV_MS = 20
 
@@ -405,9 +419,11 @@ class VoiceService : Service() {
         rec.startRecording()
 
         Thread({
-            // Στέλνουμε ~100 ms τη φορά: αρκετά μικρό για να μη φαίνεται
-            // καθυστέρηση, αρκετά μεγάλο για να μην πνίγεται το δίκτυο.
-            val chunk = ShortArray(IN_RATE / 10)
+            // Στέλνουμε ~40 ms τη φορά. Ήταν 100, και η ανίχνευση τέλους λόγου
+            // στον server δεν μπορεί να δει τη σιωπή πριν φτάσει το κομμάτι που
+            // την περιέχει: κάθε κομμάτι είναι κβάντο καθυστέρησης. Κάτω από 40
+            // ms δεν αξίζει — το κόστος του πλαισίου WebSocket μεγαλώνει.
+            val chunk = ShortArray(IN_RATE / 25)
             val bytes = ByteArray(chunk.size * 2)
             var silent = 0
             while (running) {
@@ -438,7 +454,7 @@ class VoiceService : Service() {
                 val mrms = sqrt(sum / n).toFloat()
                 Voice.noteMic(mrms)
                 if (mrms < 1e-5f) silent++ else silent = 0
-                if (silent == 300) note("μικρόφωνο", "σιωπή 30 δευτερολέπτων — το πήρε άλλος;")
+                if (silent == 750) note("μικρόφωνο", "σιωπή 30 δευτερολέπτων — το πήρε άλλος;")
 
                 // ΚΑΤΑΣΤΟΛΗ ΗΧΟΥΣ.
                 //
@@ -791,6 +807,15 @@ class VoiceService : Service() {
     }
 
     private fun enqueue(b64: String) {
+        // Η ΕΣΤΙΑΣΗ ΖΗΤΙΕΤΑΙ ΕΔΩ, ΜΟΛΙΣ ΦΤΑΣΕΙ ΤΟ ΠΑΚΕΤΟ.
+        //
+        // Ήταν στο νήμα αναπαραγωγής, ένα βήμα πριν το `write`: δηλαδή μετά
+        // την αποκωδικοποίηση, μετά την ουρά και μετά την παράδοση σε άλλο
+        // νήμα, με όλα αυτά στον δρόμο της πρώτης συλλαβής. Η
+        // `requestAudioFocus` είναι κλήση προς άλλη διεργασία και δεν έχει
+        // καμία δουλειά εκεί. Με το [FOCUS_HOLD_NS] επιστρέφει συνήθως
+        // αμέσως, γιατί την κρατάμε ήδη από την προηγούμενη ατάκα.
+        requestFocus()
         val raw = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Throwable) { return }
         val pcm = ShortArray(raw.size / 2)
         for (i in pcm.indices) {
@@ -868,10 +893,6 @@ class VoiceService : Service() {
         Thread({
             while (running) {
                 val pcm = playQueue.poll(120, TimeUnit.MILLISECONDS) ?: continue
-                // Η εστίαση ζητιέται ΕΔΩ, πριν γραφτεί το πρώτο δείγμα — όχι στον
-                // μετρητή, που θα το καταλάβαινε ένα καρέ αργότερα και θα έκοβε
-                // την αρχή της πρώτης λέξης.
-                requestFocus()
                 Rec.pushAgent(pcm)
                 fillEnvelope(pcm)
                 try { track?.write(pcm, 0, pcm.size) } catch (e: Throwable) { }
@@ -1015,7 +1036,7 @@ class VoiceService : Service() {
                     // σε ριπές με κενά — δεν έχει νόημα να γυρίζει το κανάλι
                     // μαζί τους.
                     if (quietSince == 0L) quietSince = now
-                    else if (now - quietSince > 1_500_000_000L) abandonFocus()
+                    else if (now - quietSince > FOCUS_HOLD_NS) abandonFocus()
                 }
                 Voice.note(Voice.level)
 
