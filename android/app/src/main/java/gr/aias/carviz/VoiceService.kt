@@ -101,6 +101,11 @@ class VoiceService : Service() {
     /** Τελευταία θέση κεφαλής και πότε κουνήθηκε — ανίχνευση παγώματος. */
     private var lastHead = -1L
     private var lastHeadMoveAt = 0L
+    /** Το προηγούμενο υπόλοιπο· το ρολόι παγώματος ξεκινά όταν εμφανιστεί ουρά. */
+    private var prevPending = 0L
+    /** Πόσες φορές ξαναδέθηκε η χρονογραμμή: πραγματικά παγώματα και διαφωνίες. */
+    @Volatile private var freezes = 0
+    @Volatile private var desyncs = 0
     /** Μετρητές της διαδρομής μικρόφωνο → δίκτυο, για να μη χάνεται τίποτα σιωπηλά. */
     @Volatile private var reads = 0
     @Volatile private var readFails = 0
@@ -798,6 +803,24 @@ class VoiceService : Service() {
 
     // -------------------------------------------------- χρονογραμμή και στάθμη
 
+    /**
+     * Ξαναδένει τη χρονογραμμή πάνω στην τρέχουσα θέση της κεφαλής.
+     *
+     * Καλείται πάντα μέσα από `synchronized(env)`. Η διαφορά από την
+     * [resetTimeline] είναι ότι εκεί μηδενίζονται **και τα δύο** —σωστό μόνο
+     * όταν η ίδια η κεφαλή μηδενίζεται, δηλαδή μετά από `flush()`— ενώ εδώ η
+     * κεφαλή συνεχίζει και ο μετρητής μας πάει να τη βρει.
+     */
+    private fun rebase(head: Long) {
+        java.util.Arrays.fill(env, 0f)
+        envWrite = (head / envHop).toInt()
+        envAcc = 0.0
+        envCount = 0
+        written = head
+        lastHeadMoveAt = 0L
+        prevPending = 0L
+    }
+
     private fun resetTimeline() {
         synchronized(env) {
             java.util.Arrays.fill(env, 0f)
@@ -893,26 +916,58 @@ class VoiceService : Service() {
                 // από τα 171 δευτερόλεπτα της κλήσης, μόνο 36 έφτασαν στην
                 // απομαγνητοφώνηση. Ο χρήστης μιλούσε σε τοίχο.
                 if (head != lastHead) { lastHead = head; lastHeadMoveAt = now }
-                val stalled = lastHeadMoveAt != 0L &&
-                    now - lastHeadMoveAt > 1_500_000_000L
 
                 var e = 0f
                 var speaking = false
                 synchronized(env) {
                     // Το υπόλοιπο στον απομονωτή: όσο είναι θετικό, ακούγεται.
                     val pending = written - head
+
+                    // ΤΟ ΡΟΛΟΪ ΤΟΥ ΠΑΓΩΜΑΤΟΣ ΞΕΚΙΝΑΕΙ ΟΤΑΝ ΕΜΦΑΝΙΣΤΕΙ ΟΥΡΑ.
+                    //
+                    // Εδώ ήταν το σφάλμα που σκότωνε τις τελείες. Ανάμεσα σε
+                    // δύο ατάκες η κεφαλή μένει ακίνητη — φυσιολογικά, δεν
+                    // υπάρχει ήχος να παίξει. Μετά από ενάμισι δευτερόλεπτο
+                    // ο ανιχνευτής θεωρούσε ότι πάγωσε. Και μόλις ο ΑΙΑΣ
+                    // ξανάπαιρνε τον λόγο, το πρώτο κομμάτι έμπαινε στην ουρά
+                    // ενώ η κεφαλή δεν είχε προλάβει ακόμη να κουνηθεί — άρα
+                    // ο ανιχνευτής χτυπούσε **στην αρχή κάθε ατάκας**, ακριβώς
+                    // τότε που δεν έπρεπε.
+                    if (pending > 0 && prevPending <= 0) lastHeadMoveAt = now
+                    prevPending = pending
+
+                    val stalled = lastHeadMoveAt != 0L &&
+                        now - lastHeadMoveAt > 1_500_000_000L
                     speaking = pending > envHop / 2 && !stalled
+
                     if (stalled && pending > 0) {
-                        // Η ροή πάγωσε: καθαρίζουμε, ώστε να μη μείνει το
-                        // υπόλοιπο να δηλώνει ομιλία που δεν ακούγεται.
+                        // ΚΑΙ ΟΤΑΝ ΠΑΓΩΣΕΙ ΣΤ' ΑΛΗΘΕΙΑ: ΞΑΝΑΔΕΝΟΥΜΕ, ΔΕΝ ΜΗΔΕΝΙΖΟΥΜΕ.
+                        //
+                        // Το παλιό `written = 0` άφηνε την κεφαλή να τρέχει και
+                        // τον μετρητή στο μηδέν. Από εκείνη τη στιγμή το
+                        // `pending` ήταν αρνητικό **για πάντα** — «δεν μιλάει
+                        // ποτέ» — και ο δείκτης της περιβάλλουσας έπεφτε έξω
+                        // από κάθε έγκυρο παράθυρο, δηλαδή στάθμη μηδέν για
+                        // όλη την υπόλοιπη συνομιλία. Η βλάβη ήταν μόνιμη και
+                        // καθάριζε μόνο με διακοπή, που κάνει `flush`: γι' αυτό
+                        // «μία δούλευε και μία δεν δούλευε».
                         playQueue.clear()
-                        envWrite = 0; envAcc = 0.0; envCount = 0; written = 0L
-                        lastHeadMoveAt = now
-                        note("φωνή", "η ροή ήχου πάγωσε — καθαρίστηκε")
+                        rebase(head)
+                        freezes++
+                        note("φωνή", "η ροή ήχου πάγωσε — ξαναδέθηκε")
                     }
+
                     val idx = (head / envHop).toInt()
                     if (idx in 0 until envWrite && envWrite - idx <= ENV_SIZE) {
                         e = env[idx % ENV_SIZE]
+                    } else if (pending > 0) {
+                        // Η κεφαλή και η χρονογραμμή διαφώνησαν — λ.χ. επειδή
+                        // το σύστημα ξαναδρομολόγησε τον ήχο και μηδένισε την
+                        // κεφαλή από κάτω μας. Ως τώρα αυτό έβγαζε σιωπηλά
+                        // μηδενική στάθμη· τώρα ξαναδένει, δηλαδή μια αναλαμπή
+                        // 20 ms αντί για βλάβη που κρατάει ως το τέλος.
+                        rebase(head)
+                        desyncs++
                     }
                 }
 
@@ -975,9 +1030,9 @@ class VoiceService : Service() {
                 // υπηρεσία που παράγει τους αριθμούς, όχι σε μια οθόνη.
                 if (System.nanoTime() - diagMark > 1_000_000_000L) {
                     diagMark = System.nanoTime()
-                    note("στάθμη", "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s".format(
+                    note("στάθμη", "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s · ξαναδ %d+%d".format(
                         Voice.lo, Voice.hi, Voice.mode, Voice.micHi,
-                        Voice.histLine(), Voice.extLine()))
+                        Voice.histLine(), Voice.extLine(), freezes, desyncs))
                     note("μικρόφωνο",
                         "διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f".format(
                             reads, readFails, sent, sendFails, Voice.micHi))
