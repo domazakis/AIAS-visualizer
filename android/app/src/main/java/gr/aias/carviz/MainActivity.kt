@@ -97,6 +97,25 @@ class MainActivity : AppCompatActivity() {
                 ).show()
             }
         }
+
+        // ΠΟΥ ΑΚΟΥΓΕΤΑΙ Ο ΑΙΑΣ. Διακόπτης και όχι σταθερά, επειδή μόνο μια
+        // διαδρομή απαντά ποια από τις δύο διαδρομές είναι καλύτερη, και
+        // επειδή η απάντηση μπορεί να αλλάζει από αυτοκίνητο σε αυτοκίνητο.
+        // Αλλάζει πριν ξεκινήσει η υπηρεσία· αν τρέχει, εφαρμόζεται στο
+        // επόμενο άνοιγμα.
+        val route = Button(this).apply {
+            text = Route.label(this@MainActivity)
+            setOnClickListener {
+                Route.set(this@MainActivity, !Route.inCar(this@MainActivity))
+                text = Route.label(this@MainActivity)
+                android.widget.Toast.makeText(
+                    this@MainActivity,
+                    "ισχύει από το επόμενο ξεκίνημα της φωνής",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
         val col = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             // Τα κουμπιά ΠΑΝΩ από το κείμενο. Ήταν από κάτω, και με τρεις
@@ -112,6 +131,7 @@ class MainActivity : AppCompatActivity() {
             addView(viz, lp())
             addView(voice, lp())
             addView(probe, lp())
+            addView(route, lp())
             addView(tv)
             addView(pv)
         }

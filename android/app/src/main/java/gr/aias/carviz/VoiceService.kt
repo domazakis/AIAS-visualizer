@@ -169,7 +169,7 @@ class VoiceService : Service() {
         startForegroundNotice()
         Voice.active = true
         note("φωνή", "η υπηρεσία ξεκίνησε")
-        routeToPhone()
+        routeAudio()
         watchDevices()
         raiseCallVolume()
         val rec = Rec.start(this)
@@ -482,10 +482,12 @@ class VoiceService : Service() {
                 // σκότωνε τη διακοπή με τη φωνή.
                 //
                 // Και τα δύο ήταν μπαλώματα σε λάθος σημείο. Η αιτία ήταν ότι ο
-                // ήχος έφευγε στα ηχεία του αυτοκινήτου, όπου ο ακυρωτής ηχούς
-                // του κινητού δεν έχει αναφορά. Τώρα που ο ήχος μένει στο
-                // κινητό —δες [routeToPhone]— ο ακυρωτής δουλεύει κανονικά,
-                // όπως αποδείχθηκε σε ανοιχτή ακρόαση: εκεί δεν κόπηκε ποτέ.
+                // ήχος έφευγε στο κανάλι ΜΟΥΣΙΚΗΣ του αυτοκινήτου, όπου κανένας
+                // ακυρωτής δεν έχει αναφορά: ούτε του κινητού, που δεν παίζει,
+                // ούτε του αυτοκινήτου, που δεν ακούει. Και οι δύο δρόμοι που
+                // δουλεύουν —ηχείο κινητού ή κανάλι ΚΛΗΣΗΣ του αυτοκινήτου—
+                // βάζουν πίσω στο κύκλωμα κάποιον που ξέρει τι παίζει. Δες
+                // [Route].
                 //
                 // Άρα το μικρόφωνο μένει ανοιχτό και η διακοπή με τη φωνή
                 // επιστρέφει. Αν η ηχώ ξαναφανεί, θα φανεί αμέσως στις
@@ -550,47 +552,73 @@ class VoiceService : Service() {
      * ακρόαση με ένταση που ελέγχεται από το κινητό. Στην οθόνη του
      * αυτοκινήτου μένει αυτό που θέλαμε εξαρχής — οι τελείες.
      */
-    private fun routeToPhone() {
+
+    /** Πού κρέμεται τελικά το μικρόφωνο: στο κινητό ή στο αυτοκίνητο. */
+    private fun micSource(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return "—"
+        val d = try { recorder?.routedDevice } catch (e: Throwable) { null }
+        return when (d?.type) {
+            null -> "άγνωστο"
+            AudioDeviceInfo.TYPE_BUILTIN_MIC -> "κινητό"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "αυτοκίνητο"
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "ακουστικό"
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
+            AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "προβολή"
+            else -> "τύπος ${d.type}"
+        }
+    }
+
+    private fun routeAudio() {
         val am = getSystemService(AudioManager::class.java) ?: return
         try {
             @Suppress("DEPRECATION")
             am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-            // ΤΟ BLUETOOTH ΤΟΥ ΑΥΤΟΚΙΝΗΤΟΥ ΔΕΝ ΕΙΝΑΙ ΑΚΟΥΣΤΙΚΟ.
-            //
-            // Εδώ ήταν και το `TYPE_BLUETOOTH_SCO`, με σκεπτικό «ο οδηγός
-            // διάλεξε ακουστικό, δεν του το χαλάμε». Στο αυτοκίνητο όμως το
-            // ίδιο το MG είναι ζευγαρωμένο ως hands-free: η εξαίρεση έπιανε
-            // ακριβώς τη μία περίπτωση που έπρεπε να αποφύγουμε, κι έτσι όλο
-            // το νόημα της έκδοσης 32 —ο ήχος να μένει στο κινητό— μπορούσε
-            // να ακυρωθεί από αυτή τη μία γραμμή.
-            //
-            // Ακουστικό είναι μόνο ό,τι μπαίνει με καλώδιο στο κινητό.
+            // Ακουστικό είναι μόνο ό,τι μπαίνει με καλώδιο στο κινητό. Το
+            // Bluetooth του αυτοκινήτου ΔΕΝ είναι ακουστικό — είναι ο
+            // προορισμός που διαλέγουμε παρακάτω, όχι εξαίρεση.
             val headset = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
                 it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
                 it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
                 it.type == AudioDeviceInfo.TYPE_USB_HEADSET
             }
-            if (headset) { note("ήχος", "ακουστικό — χωρίς επιβολή"); return }
+            if (headset) { note("δρομολόγηση", "ακουστικό — χωρίς επιβολή"); return }
+
+            val wantCar = Route.inCar(this)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val spk = am.availableCommunicationDevices.firstOrNull {
-                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-                }
-                // Η ΕΠΙΣΤΡΟΦΗ ΜΕΤΡΑΕΙ. Την αγνοούσαμε, κι έτσι μια αποτυχία
-                // δρομολόγησης ήταν ακριβώς τόσο σιωπηλή όσο μια επιτυχία.
-                val ok = spk != null && am.setCommunicationDevice(spk)
-                if (!ok) note("ήχος", "ΔΕΝ κρατήθηκε στο ηχείο του κινητού")
+                val avail = am.availableCommunicationDevices
+                val sco = avail.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+                val spk = avail.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+
+                // Η ΓΡΑΜΜΗ ΚΛΗΣΗΣ ΤΟΥ ΑΥΤΟΚΙΝΗΤΟΥ, ΟΧΙ Η ΓΡΑΜΜΗ ΜΟΥΣΙΚΗΣ.
+                //
+                // Δες [Route] για το γιατί. Με δυο λόγια: στο κανάλι κλήσης το
+                // αυτοκίνητο δίνει και το μικρόφωνό του, άρα ακυρώνει την ηχώ
+                // μόνο του. Στο κανάλι μουσικής δεν συμμετέχει το μικρόφωνό
+                // του και δεν ακυρώνει κανείς — εκεί πέσαμε στις 32 και 34.
+                val target = if (wantCar) (sco ?: spk) else spk
+                val ok = target != null && am.setCommunicationDevice(target)
+                note("δρομολόγηση", when {
+                    !ok -> "ΑΠΕΤΥΧΕ · ζητήθηκε ${if (wantCar) "αυτοκίνητο" else "κινητό"}"
+                    target!!.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ->
+                        "αυτοκίνητο, γραμμή κλήσης"
+                    wantCar -> "κινητό — δεν βρέθηκε γραμμή κλήσης αυτοκινήτου"
+                    else -> "ηχείο κινητού, όπως ζητήθηκε"
+                })
             } else {
                 @Suppress("DEPRECATION")
-                am.isSpeakerphoneOn = true
+                if (wantCar) { am.startBluetoothSco(); am.isBluetoothScoOn = true }
+                else { am.isSpeakerphoneOn = true }
+                note("δρομολόγηση", if (wantCar) "αυτοκίνητο (παλιό API)"
+                                    else "κινητό (παλιό API)")
             }
         } catch (e: Throwable) {
             // ΚΑΙ ΣΤΑ ΔΙΑΓΝΩΣΤΙΚΑ, όχι μόνο στο logcat: στο αυτοκίνητο δεν
-            // υπάρχει logcat, και μια `SecurityException` εδώ σημαίνει ότι ο
-            // ήχος δεν κρατήθηκε ποτέ στο κινητό.
-            Log.w(TAG, "δεν μπόρεσα να κρατήσω τον ήχο στο κινητό", e)
-            note("ήχος", "η δρομολόγηση απέτυχε: ${e.javaClass.simpleName}")
+            // υπάρχει logcat, και μια `SecurityException` εδώ σημαίνει ότι η
+            // δρομολόγηση δεν εφαρμόστηκε ποτέ.
+            Log.w(TAG, "δεν μπόρεσα να δρομολογήσω τον ήχο", e)
+            note("δρομολόγηση", "σφάλμα: ${e.javaClass.simpleName}")
         }
     }
 
@@ -600,7 +628,7 @@ class VoiceService : Service() {
      * Μία φορά στην εκκίνηση δεν αρκεί, και το πληρώσαμε ολόκληρη διαδρομή:
      * στις 18/09 η υπηρεσία ξεκίνησε 19:40:17 και το Bluetooth του
      * αυτοκινήτου συνδέθηκε 19:40:21 — τέσσερα δευτερόλεπτα αργότερα. Η
-     * [routeToPhone] είχε ήδη αποφασίσει σε έναν κόσμο χωρίς αυτοκίνητο, και
+     * [routeAudio] είχε ήδη αποφασίσει σε έναν κόσμο χωρίς αυτοκίνητο, και
      * ο ήχος μετακόμισε από κάτω της. Το διαγνωστικό το έγραψε καθαρά:
      * «ήχος: Bluetooth (μουσική)», δηλαδή στα ηχεία του MG.
      */
@@ -612,7 +640,7 @@ class VoiceService : Service() {
                 override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) = recheck()
                 private fun recheck() {
                     if (!running) return
-                    routeToPhone()
+                    routeAudio()
                     // Και ξαναμετράμε πού βγήκε τελικά — αλλιώς η γραμμή
                     // «ήχος» έμενε από το άνοιγμα του καναλιού και έλεγε
                     // ψέματα για την υπόλοιπη διαδρομή.
@@ -682,7 +710,12 @@ class VoiceService : Service() {
         val am = getSystemService(AudioManager::class.java) ?: return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.clearCommunicationDevice()
-            else { @Suppress("DEPRECATION") am.isSpeakerphoneOn = false }
+            else {
+                @Suppress("DEPRECATION")
+                am.isSpeakerphoneOn = false
+                @Suppress("DEPRECATION")
+                am.stopBluetoothSco()
+            }
             @Suppress("DEPRECATION")
             am.mode = AudioManager.MODE_NORMAL
         } catch (e: Throwable) { }
@@ -1054,9 +1087,15 @@ class VoiceService : Service() {
                     note("στάθμη", "%.2f – %.2f · %s · μικρ %.4f · καδ %s · υψ %s · ξαναδ %d+%d".format(
                         Voice.lo, Voice.hi, Voice.mode, Voice.micHi,
                         Voice.histLine(), Voice.extLine(), freezes, desyncs))
+                    // ΚΑΙ ΑΠΟ ΠΟΥ ΑΚΟΥΕΙ. Η κρίσιμη ένδειξη για τη γραμμή
+                    // κλήσης: αν το μικρόφωνο είναι του αυτοκινήτου, τότε ο
+                    // ακυρωτής ηχούς του αυτοκινήτου είναι μέσα στο κύκλωμα.
+                    // Αν λέει «κινητό» ενώ ο ήχος βγαίνει στα ηχεία του
+                    // αυτοκινήτου, η ηχώ θα επιστρέψει και το ξέρουμε πριν
+                    // ακούσουμε την ηχογράφηση.
                     note("μικρόφωνο",
-                        "διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f".format(
-                            reads, readFails, sent, sendFails, Voice.micHi))
+                        "διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f · από %s".format(
+                            reads, readFails, sent, sendFails, Voice.micHi, micSource()))
                     note("εγγραφή", "%s · %s".format(
                         Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
