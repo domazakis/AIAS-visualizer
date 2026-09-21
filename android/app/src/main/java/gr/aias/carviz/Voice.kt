@@ -51,7 +51,22 @@ object Voice {
      */
     @Volatile var micHi = 0f
 
-    fun noteMic(v: Float) { if (v > micHi) micHi = v }
+    /**
+     * Η κορυφή του μικροφώνου **μόνο όσο μιλάει ο ΑΙΑΣ**.
+     *
+     * Η μία μέτρηση που ξεχωρίζει τις δύο εξηγήσεις για το «δεν μπορώ να τον
+     * διακόψω». Αν εδώ μένει μηδέν ενώ η [micHi] έχει κανονική τιμή, τότε το
+     * hands-free του αυτοκινήτου **κλείνει το μικρόφωνο** όσο παίζει — και η
+     * τέλεια ακύρωση ηχούς και η αδυναμία διακοπής είναι ο ίδιος μηχανισμός.
+     * Αν όμως ακούγεσαι κανονικά και πάλι δεν κόβεται, το πρόβλημα είναι στην
+     * ανίχνευση διακοπής του ElevenLabs και λύνεται αλλού.
+     */
+    @Volatile var micHiSpeak = 0f
+
+    fun noteMic(v: Float, speaking: Boolean) {
+        if (v > micHi) micHi = v
+        if (speaking && v > micHiSpeak) micHiSpeak = v
+    }
 
     /**
      * Εύρος στάθμης των τελευταίων δειγμάτων, μόνο για διάγνωση.
@@ -109,7 +124,7 @@ object Voice {
 
     /** Καλείται μία φορά το δευτερόλεπτο, αφού καταγραφεί το εύρος. */
     fun rollWindow() {
-        lo = 1f; hi = 0f; micHi = 0f
+        lo = 1f; hi = 0f; micHi = 0f; micHiSpeak = 0f
         synchronized(hist) { java.util.Arrays.fill(hist, 0) }
         synchronized(extHist) { java.util.Arrays.fill(extHist, 0) }
     }
@@ -122,6 +137,7 @@ object Voice {
         lastAgent = ""
         route = "—"
         micHi = 0f
+        micHiSpeak = 0f
         lo = 1f
         hi = 0f
     }

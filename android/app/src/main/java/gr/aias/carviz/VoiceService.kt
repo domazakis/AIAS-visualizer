@@ -125,6 +125,8 @@ class VoiceService : Service() {
     @Volatile private var readFails = 0
     @Volatile private var sent = 0
     @Volatile private var sendFails = 0
+    /** Πόσα μηνύματα διακοπής έστειλε ο server — δες τον χειριστή «interruption». */
+    @Volatile private var interruptions = 0
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -379,6 +381,11 @@ class VoiceService : Service() {
                 "interruption" -> {
                     // Ο χρήστης έκοψε τον agent: πετάμε ό,τι δεν παίχτηκε ακόμη,
                     // αλλιώς η φωνή συνεχίζει να μιλάει αφού έχει σταματήσει.
+                    // ΜΕΤΡΙΕΤΑΙ. Με τη γραμμή κλήσης του αυτοκινήτου η διακοπή
+                    // έπαψε να δουλεύει, και χωρίς αυτόν τον μετρητή δεν
+                    // ξεχωρίζει το «δεν με άκουσε ο server» από το «ήρθε το
+                    // μήνυμα και δεν το εκτελέσαμε σωστά».
+                    interruptions++
                     playQueue.clear()
                     flushAudio()
                 }
@@ -452,7 +459,7 @@ class VoiceService : Service() {
                 // υποψήφιος. Το καταγράφουμε: αλλιώς φαίνεται σαν να μη μιλάει
                 // κανείς, και δεν ξεχωρίζει από τη σιωπή του οδηγού.
                 val mrms = sqrt(sum / n).toFloat()
-                Voice.noteMic(mrms)
+                Voice.noteMic(mrms, Voice.mode == "speak")
                 if (mrms < 1e-5f) silent++ else silent = 0
                 if (silent == 750) note("μικρόφωνο", "σιωπή 30 δευτερολέπτων — το πήρε άλλος;")
 
@@ -1094,8 +1101,10 @@ class VoiceService : Service() {
                     // αυτοκινήτου, η ηχώ θα επιστρέψει και το ξέρουμε πριν
                     // ακούσουμε την ηχογράφηση.
                     note("μικρόφωνο",
-                        "διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f · από %s".format(
-                            reads, readFails, sent, sendFails, Voice.micHi, micSource()))
+                        ("διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f " +
+                         "(ενώ μιλά %.4f) · από %s · διακοπές %d").format(
+                            reads, readFails, sent, sendFails,
+                            Voice.micHi, Voice.micHiSpeak, micSource(), interruptions))
                     note("εγγραφή", "%s · %s".format(
                         Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
