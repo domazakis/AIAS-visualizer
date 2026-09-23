@@ -173,7 +173,6 @@ class VoiceService : Service() {
         note("φωνή", "η υπηρεσία ξεκίνησε")
         routeAudio()
         watchDevices()
-        raiseCallVolume()
         val rec = Rec.start(this)
         note("εγγραφή", rec?.substringAfterLast('/') ?: "δεν ξεκίνησε")
         connect()
@@ -540,6 +539,11 @@ class VoiceService : Service() {
     private var deviceWatcher: Any? = null
 
     /** Η ένταση κλήσης πριν την πειράξουμε — δες [raiseCallVolume]. */
+    private var setCallVolume = -1
+    /** Σε ποιες εξόδους έχουμε ήδη επέμβει. Μία φορά στην καθεμία, ποτέ δεύτερη. */
+    private val rescued = java.util.Collections.synchronizedSet(HashSet<Int>())
+    /** Τι κάναμε στην ένταση, για τα διαγνωστικά. */
+    @Volatile private var volFix = "—"
     private var savedCallVolume = -1
 
     /**
@@ -613,12 +617,17 @@ class VoiceService : Service() {
                     wantCar -> "κινητό — δεν βρέθηκε γραμμή κλήσης αυτοκινήτου"
                     else -> "ηχείο κινητού, όπως ζητήθηκε"
                 })
+                // Η διάσωση της έντασης γίνεται ΕΔΩ, όπου ξέρουμε σε ποια έξοδο
+                // καταλήξαμε, και μία μόνο φορά για την καθεμία.
+                if (ok) raiseCallVolume(target!!.type)
             } else {
                 @Suppress("DEPRECATION")
                 if (wantCar) { am.startBluetoothSco(); am.isBluetoothScoOn = true }
                 else { am.isSpeakerphoneOn = true }
                 note("δρομολόγηση", if (wantCar) "αυτοκίνητο (παλιό API)"
                                     else "κινητό (παλιό API)")
+                raiseCallVolume(if (wantCar) AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                                else AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
             }
         } catch (e: Throwable) {
             // ΚΑΙ ΣΤΑ ΔΙΑΓΝΩΣΤΙΚΑ, όχι μόνο στο logcat: στο αυτοκίνητο δεν
@@ -652,7 +661,6 @@ class VoiceService : Service() {
                     // «ήχος» έμενε από το άνοιγμα του καναλιού και έλεγε
                     // ψέματα για την υπόλοιπη διαδρομή.
                     track?.let { noteRoute(it) }
-                    raiseCallVolume()
                 }
             }
             deviceWatcher = cb
@@ -660,48 +668,59 @@ class VoiceService : Service() {
         } catch (e: Throwable) { }
     }
 
+    /** Η τρέχουσα ένταση κλήσης, ζωντανά. Αν κουνιέται, κουνιέται από εσένα. */
+    private fun callVolume(): String = try {
+        val am = getSystemService(AudioManager::class.java)!!
+        am.getStreamVolume(AudioManager.STREAM_VOICE_CALL).toString() + "/" +
+            am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL).toString()
+    } catch (e: Throwable) { "—" }
+
     /**
-     * Η ένταση της ΚΛΗΣΗΣ, που δεν είναι η ένταση που ανεβάζει ο οδηγός.
+     * Ανεβάζει την ένταση κλήσης **μία φορά ανά έξοδο**, και μετά τραβιέται.
      *
-     * Στις 18/09 δεν ακούστηκε ούτε λέξη, και ο λόγος ήταν αυτός ο αριθμός:
+     * ΗΤΑΝ ΛΑΘΟΣ ΚΑΙ ΤΟ ΠΛΗΡΩΣΕ Ο ΟΔΗΓΟΣ. Η συνάρτηση καλούνταν και από τον
+     * παρατηρητή συσκευών, δηλαδή σε κάθε αλλαγή εξόδου — και στο αυτοκίνητο
+     * αυτές είναι συνεχείς: η γραμμή κλήσης ανοίγει, κλείνει, το A2DP
+     * εμφανίζεται, η προβολή σηκώνει τον δικό της δίαυλο. Κάθε φορά η ένταση
+     * πεταγόταν πίσω στα 7/8. Ο οδηγός τη χαμήλωνε και του την ξανανέβαζε η
+     * εφαρμογή: «δεν μπορούσα να την αυξομειώσω πάντα με επιτυχία».
      *
-     *     STREAM_VOICE_CALL … 80 (bt_a2dp): 1      (min 1, max 8)
-     *
-     * Ο ΑΙΑΣ παίζει ως `USAGE_VOICE_COMMUNICATION`, άρα στο κανάλι κλήσης.
-     * Στο Bluetooth του αυτοκινήτου το κανάλι αυτό ήταν στο **ένα στα οκτώ**,
-     * δηλαδή στο απόλυτο ελάχιστο. Και όταν ο οδηγός πάτησε ένταση, το
-     * σύστημα κούνησε το κανάλι **μουσικής** (`stream=3`, 0→6 και μετά 0→15),
-     * επειδή για εκείνο δεν υπήρχε ενεργή κλήση. Η φωνή έμεινε στο ένα.
-     *
-     * Δεν είναι κάτι που μπορεί να βρει ο χρήστης: η ένταση κλήσης ρυθμίζεται
-     * μόνο ΜΕΣΑ σε κλήση. Άρα τη σηκώνουμε εμείς και τη γυρνάμε πίσω στο
-     * τέλος. Η τιμή είναι ανά συσκευή εξόδου, γι' αυτό ξαναμπαίνει σε κάθε
-     * αλλαγή δρομολόγησης.
+     * Ο σκοπός ήταν **διάσωση, όχι πολιτική**: να βγούμε από το 1/8 που δεν
+     * ρυθμίζεται από πουθενά έξω από κλήση. Μία φορά ανά συσκευή αρκεί. Από
+     * εκεί και πέρα η ένταση είναι του οδηγού.
      */
-    private fun raiseCallVolume() {
+    private fun raiseCallVolume(deviceType: Int) {
         val am = getSystemService(AudioManager::class.java) ?: return
         try {
             val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
             val cur = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            if (!rescued.add(deviceType)) return
             val want = max - max / 8
-            if (cur >= want) { note("ένταση", "κλήση $cur/$max — εντάξει"); return }
-            // Κρατάμε μόνο την πρώτη τιμή που βρήκαμε: αν τη σώζαμε ξανά σε
-            // κάθε αλλαγή, θα γυρνούσαμε πίσω τη δική μας.
+            if (cur >= want) { volFix = "ήταν ήδη $cur/$max"; return }
             if (savedCallVolume < 0) savedCallVolume = cur
             am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, want, 0)
             val got = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
-            note("ένταση", "κλήση $cur → $got (από $max)")
+            setCallVolume = got
+            volFix = "ανέβηκε $cur→$got μία φορά"
         } catch (e: Throwable) {
-            note("ένταση", "δεν άλλαξε: ${e.javaClass.simpleName}")
+            volFix = "δεν άλλαξε: ${e.javaClass.simpleName}"
         }
     }
 
     private fun restoreCallVolume() {
         val v = savedCallVolume
+        val mine = setCallVolume
         savedCallVolume = -1
+        setCallVolume = -1
+        rescued.clear()
         if (v < 0) return
         val am = getSystemService(AudioManager::class.java) ?: return
-        try { am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, v, 0) } catch (e: Throwable) { }
+        try {
+            // Αν ο οδηγός την άλλαξε μετά από εμάς, η δική του μένει. Δεν
+            // ακυρώνουμε επιλογή που πήρε ο άνθρωπος στη διαδρομή.
+            if (am.getStreamVolume(AudioManager.STREAM_VOICE_CALL) == mine)
+                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, v, 0)
+        } catch (e: Throwable) { }
     }
 
     private fun unwatchDevices() {
@@ -1105,6 +1124,7 @@ class VoiceService : Service() {
                          "(ενώ μιλά %.4f) · από %s · διακοπές %d").format(
                             reads, readFails, sent, sendFails,
                             Voice.micHi, Voice.micHiSpeak, micSource(), interruptions))
+                    note("ένταση", "κλήση %s · %s".format(callVolume(), volFix))
                     note("εγγραφή", "%s · %s".format(
                         Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
