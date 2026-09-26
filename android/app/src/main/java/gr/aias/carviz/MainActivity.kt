@@ -39,10 +39,22 @@ class MainActivity : AppCompatActivity() {
             refresh()
             return
         }
+        // ΤΟ ΜΙΚΡΟΦΩΝΟ ΕΙΝΑΙ ΥΠΟΧΡΕΩΤΙΚΟ, Η ΤΟΠΟΘΕΣΙΑ ΟΧΙ.
+        //
+        // Ζητιούνται μαζί για να μη δει ο χρήστης δύο παράθυρα, αλλά μόνο το
+        // πρώτο σταματάει την εκκίνηση. Αν αρνηθεί την τοποθεσία, ο ΑΙΑΣ
+        // μιλάει κανονικά και απαντά «δεν ξέρω πού είμαστε» όταν ρωτηθεί.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            ActivityCompat.requestPermissions(this, arrayOf(
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.ACCESS_FINE_LOCATION), 1)
             return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 2)
         }
         startService(Intent(this, VoiceService::class.java))
         refresh()
@@ -54,6 +66,12 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             startService(Intent(this, VoiceService::class.java))
+        }
+        // Η τοποθεσία μπορεί να εγκριθεί αφού έχει ήδη ξεκινήσει η φωνή.
+        if (permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            Where.start(applicationContext)
         }
         refresh()
     }

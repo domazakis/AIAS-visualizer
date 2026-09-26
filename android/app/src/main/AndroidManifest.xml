@@ -60,6 +60,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
+    <!-- Η τοποθεσία δίνεται στον ΑΙΑΝΤΑ ΜΟΝΟ όταν τη ζητήσει ο ίδιος, μέσα από
+         εργαλείο. Δεν ζητάμε ACCESS_BACKGROUND_LOCATION: η υπηρεσία είναι
+         πάντα σε προσκήνιο όσο μιλάτε, και τίποτα δεν τρέχει μετά. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_aias"
@@ -104,7 +111,7 @@
         <service
             android:name=".VoiceService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone|location" />
 
         <activity
             android:name=".MainActivity"

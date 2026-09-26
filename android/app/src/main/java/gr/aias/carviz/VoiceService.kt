@@ -58,6 +58,9 @@ class VoiceService : Service() {
         private const val NOTIF_ID = 1
 
         /** Η είσοδος του agent είναι PCM 16 kHz, μονοφωνικό, 16 bit. */
+        /** Το όνομα του εργαλείου, όπως δηλώνεται στην κονσόλα του ElevenLabs. */
+        private const val TOOL_WHERE = "pou_eimaste"
+
         private const val IN_RATE = 16000
 
         /**
@@ -127,6 +130,8 @@ class VoiceService : Service() {
     @Volatile private var sendFails = 0
     /** Πόσα μηνύματα διακοπής έστειλε ο server — δες τον χειριστή «interruption». */
     @Volatile private var interruptions = 0
+    /** Πόσες φορές ρώτησε ο agent πού είμαστε. */
+    @Volatile private var toolCalls = 0
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -172,6 +177,7 @@ class VoiceService : Service() {
         Voice.active = true
         note("φωνή", "η υπηρεσία ξεκίνησε")
         routeAudio()
+        Where.start(this)
         watchDevices()
         val rec = Rec.start(this)
         note("εγγραφή", rec?.substringAfterLast('/') ?: "δεν ξεκίνησε")
@@ -192,6 +198,7 @@ class VoiceService : Service() {
         unwatchDevices()
         releasePhoneRoute()
         Rec.stop()
+        Where.stop()
         Voice.reset()
         Voice.status = "ανενεργή"
         note("φωνή", "η υπηρεσία σταμάτησε")
@@ -376,6 +383,29 @@ class VoiceService : Service() {
                 "ping" -> {
                     val id = o.optJSONObject("ping_event")?.optInt("event_id") ?: 0
                     webSocket.send(JSONObject().put("type", "pong").put("event_id", id).toString())
+                }
+                // ΤΟ ΕΡΓΑΛΕΙΟ ΤΗΣ ΘΕΣΗΣ.
+                //
+                // Ο agent το καλεί μόνος του όταν το χρειάζεται· δες [Where]
+                // για το γιατί εργαλείο και όχι συνεχής τροφοδοσία. Η απάντηση
+                // είναι πάντα ολόκληρη πρόταση, ακόμη και όταν το GPS είναι
+                // κλειστό — ο ΑΙΑΣ πρέπει να μπορεί να πει «δεν βλέπω πού
+                // είμαστε» και να συνεχίσει, όχι να κολλήσει μέσα σε λήψη.
+                "client_tool_call" -> {
+                    val c = o.optJSONObject("client_tool_call")
+                    val id = c?.optString("tool_call_id") ?: ""
+                    val name = c?.optString("tool_name") ?: ""
+                    val known = name == TOOL_WHERE
+                    val answer = if (known) Where.describe(this)
+                                 else "Δεν έχω τέτοιο εργαλείο."
+                    toolCalls++
+                    note("θέση", "$name → ${Where.line()}")
+                    webSocket.send(JSONObject()
+                        .put("type", "client_tool_result")
+                        .put("tool_call_id", id)
+                        .put("result", answer)
+                        .put("is_error", !known)
+                        .toString())
                 }
                 "interruption" -> {
                     // Ο χρήστης έκοψε τον agent: πετάμε ό,τι δεν παίχτηκε ακόμη,
@@ -1125,6 +1155,7 @@ class VoiceService : Service() {
                             reads, readFails, sent, sendFails,
                             Voice.micHi, Voice.micHiSpeak, micSource(), interruptions))
                     note("ένταση", "κλήση %s · %s".format(callVolume(), volFix))
+                    note("θέση", "%s · ρωτήθηκε %d".format(Where.line(), toolCalls))
                     note("εγγραφή", "%s · %s".format(
                         Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
