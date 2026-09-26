@@ -60,6 +60,7 @@ class VoiceService : Service() {
         /** Η είσοδος του agent είναι PCM 16 kHz, μονοφωνικό, 16 bit. */
         /** Το όνομα του εργαλείου, όπως δηλώνεται στην κονσόλα του ElevenLabs. */
         private const val TOOL_WHERE = "pou_eimaste"
+        private const val TOOL_REMEMBER = "thymisou"
 
         private const val IN_RATE = 16000
 
@@ -132,6 +133,15 @@ class VoiceService : Service() {
     @Volatile private var interruptions = 0
     /** Πόσες φορές ρώτησε ο agent πού είμαστε. */
     @Volatile private var toolCalls = 0
+    /** Έγινε ήδη κουβέντα σε αυτή τη διαδρομή; Αν ναι, η επόμενη σύνδεση είναι επανασύνδεση. */
+    @Volatile private var talkedThisDrive = false
+    /** Τέλος credits: καμία νέα προσπάθεια ως το επόμενο «Μίλα». */
+    @Volatile private var noMoreRetries = false
+    /** Ήρθε η επιβεβαίωση της συνομιλίας σε αυτή την προσπάθεια; */
+    @Volatile private var started = false
+    @Volatile private var openedAt = 0L
+    /** Ο server απέρριψε τις μεταβλητές μνήμης· συνεχίζουμε χωρίς αυτές. */
+    @Volatile private var noVars = false
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -199,6 +209,7 @@ class VoiceService : Service() {
         releasePhoneRoute()
         Rec.stop()
         Where.stop()
+        Memory.endDrive()
         Voice.reset()
         Voice.status = "ανενεργή"
         note("φωνή", "η υπηρεσία σταμάτησε")
@@ -312,8 +323,22 @@ class VoiceService : Service() {
                 Voice.status = "συνδεδεμένος"
                 Voice.mode = "listen"
                 note("φωνή", "συνδεδεμένος στον agent")
-                webSocket.send(JSONObject()
-                    .put("type", "conversation_initiation_client_data").toString())
+
+                // ΜΝΗΜΗ ΚΑΙ ΣΥΝΕΧΕΙΑ. Δες [Memory]. Επανασύνδεση σημαίνει ότι
+                // σε αυτή την ίδια διαδρομή είχε ήδη γίνει κουβέντα — τότε του
+                // δίνουμε και τις τελευταίες ατάκες και άλλον χαιρετισμό.
+                val reconnect = talkedThisDrive && Memory.hasRecent()
+                talkedThisDrive = true
+                note("μνήμη", "%d σημειώσεις · %s".format(
+                    Memory.notes(this@VoiceService).size,
+                    if (reconnect) "επανασύνδεση, με τα πρόσφατα" else "νέα διαδρομή"))
+                started = false
+                openedAt = System.nanoTime()
+                val init = JSONObject().put("type", "conversation_initiation_client_data")
+                if (!noVars) init.put("dynamic_variables", JSONObject()
+                    .put("memory", Memory.payload(this@VoiceService, reconnect))
+                    .put("greeting", Memory.greeting(reconnect)))
+                webSocket.send(init.toString())
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) = handle(webSocket, text)
@@ -324,6 +349,10 @@ class VoiceService : Service() {
                 live = null
 
                 val why = t.message ?: t.javaClass.simpleName
+                if (quota(why) || response?.code == 402 || response?.code == 429) {
+                    quotaStop(); return
+                }
+                rejectedVars()
                 val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
                 Voice.status = msg
                 Voice.mode = "idle"
@@ -335,6 +364,15 @@ class VoiceService : Service() {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 live = null
                 Log.i(TAG, "έκλεισε: $code $reason")
+                note("δίκτυο", "έκλεισε $code ${reason.take(90)}")
+                // ΤΕΛΟΣ CREDITS: ΔΕΝ ΞΑΝΑΔΟΚΙΜΑΖΟΥΜΕ, ΤΟ ΛΕΜΕ.
+                //
+                // Στις 23/09 η συνομιλία κόπηκε στο 287ο δευτερόλεπτο με «This
+                // request exceeds your quota limit», και η εφαρμογή απλώς
+                // ξαναδοκίμαζε ανά τρία δευτερόλεπτα, αποτυγχάνοντας κάθε φορά.
+                // Στο αυτοκίνητο οι τελείες πάγωναν χωρίς εξήγηση.
+                if (quota(reason)) { quotaStop(); return }
+                rejectedVars()
                 Voice.status = "αποσυνδέθηκε"
                 Voice.mode = "idle"
                 retryLater()
@@ -349,10 +387,49 @@ class VoiceService : Service() {
      * πιάσει το hotspot, ας πούμε— σήμαινε βουβό βοηθό για όλη τη διαδρομή,
      * με το κουμπί να λέει «Σταμάτα» σαν να δούλευε.
      */
+    /**
+     * ΔΙΧΤΥ ΑΣΦΑΛΕΙΑΣ ΓΙΑ ΤΙΣ ΜΕΤΑΒΛΗΤΕΣ ΜΝΗΜΗΣ.
+     *
+     * Η τεκμηρίωση του ElevenLabs δεν λέει τι γίνεται αν στείλεις μεταβλητή που
+     * το prompt δεν χρησιμοποιεί. Αν την απορρίπτει, κάθε συνομιλία θα έκλεινε
+     * αμέσως — ο ΑΙΑΣ βουβός μέχρι να αλλάξει κάποιος την κονσόλα. Δεν μπορούσε
+     * να δοκιμαστεί όταν γράφτηκε: τα credits είχαν τελειώσει.
+     *
+     * Άρα: αν η γραμμή κλείσει μέσα σε τρία δευτερόλεπτα από το άνοιγμα και
+     * ΠΡΙΝ επιβεβαιώσει ο server τη συνομιλία, ξαναδοκιμάζουμε χωρίς μεταβλητές
+     * και το γράφουμε. Χάνεται η μνήμη, όχι η κουβέντα.
+     */
+    private fun rejectedVars(): Boolean {
+        if (noVars || started || openedAt == 0L) return false
+        if (System.nanoTime() - openedAt > 3_000_000_000L) return false
+        noVars = true
+        note("μνήμη", "ο server απέρριψε τις μεταβλητές — συνεχίζουμε χωρίς μνήμη")
+        return true
+    }
+
+    /** Ο server έκλεισε επειδή τελείωσαν τα credits; */
+    private fun quota(s: String?): Boolean {
+        val t = s ?: return false
+        return t.contains("quota", true) || t.contains("credit", true) ||
+            t.contains("exceeds your", true)
+    }
+
+    /**
+     * Σταματάμε τις προσπάθειες και το λέμε. Η ετικέτα του κουμπιού στο
+     * αυτοκίνητο γράφει «Τέλος credits» — ο οδηγός ξέρει αμέσως ότι δεν αξίζει
+     * να περιμένει και ότι η λήψη πρέπει να σταματήσει.
+     */
+    private fun quotaStop() {
+        noMoreRetries = true
+        Voice.status = "τέλος credits"
+        Voice.mode = "idle"
+        note("φωνή", "ο server έκλεισε: τέλος credits στο ElevenLabs — δεν ξαναδοκιμάζουμε")
+    }
+
     private fun retryLater() {
         // Η αποτυχία φτάνει και από το `onFailure` και από το `onClosed`· χωρίς
         // τον μανδαλωτή θα ξεκινούσαν δύο προσπάθειες για το ίδιο πράγμα.
-        if (!running || !retrying.compareAndSet(false, true)) return
+        if (!running || noMoreRetries || !retrying.compareAndSet(false, true)) return
         Thread({
             try { Thread.sleep(3000) } catch (e: InterruptedException) { }
             retrying.set(false)
@@ -368,6 +445,7 @@ class VoiceService : Service() {
             val o = JSONObject(text)
             when (o.optString("type")) {
                 "conversation_initiation_metadata" -> {
+                    started = true
                     val m = o.optJSONObject("conversation_initiation_metadata_event")
                     // π.χ. "pcm_44100" — ο agent διαλέγει, εμείς προσαρμοζόμαστε.
                     val fmt = m?.optString("agent_output_audio_format") ?: "pcm_16000"
@@ -395,11 +473,29 @@ class VoiceService : Service() {
                     val c = o.optJSONObject("client_tool_call")
                     val id = c?.optString("tool_call_id") ?: ""
                     val name = c?.optString("tool_name") ?: ""
-                    val known = name == TOOL_WHERE
-                    val answer = if (known) Where.describe(this)
-                                 else "Δεν έχω τέτοιο εργαλείο."
+                    val params = c?.optJSONObject("parameters")
+                    val known: Boolean
+                    val answer: String
+                    when (name) {
+                        TOOL_WHERE -> {
+                            known = true
+                            answer = Where.describe(this)
+                            note("θέση", "$name → ${Where.line()}")
+                        }
+                        // Ο ίδιος ο ΑΙΑΣ διαλέγει τι αξίζει να θυμάται· δες [Memory].
+                        TOOL_REMEMBER -> {
+                            known = true
+                            answer = Memory.remember(this, params?.optString("text") ?: "")
+                            note("μνήμη", "%d σημειώσεις · τελευταία: %s".format(
+                                Memory.notes(this).size,
+                                (params?.optString("text") ?: "").take(60)))
+                        }
+                        else -> {
+                            known = false
+                            answer = "Δεν έχω τέτοιο εργαλείο."
+                        }
+                    }
                     toolCalls++
-                    note("θέση", "$name → ${Where.line()}")
                     webSocket.send(JSONObject()
                         .put("type", "client_tool_result")
                         .put("tool_call_id", id)
@@ -418,12 +514,18 @@ class VoiceService : Service() {
                     playQueue.clear()
                     flushAudio()
                 }
-                "user_transcript" ->
-                    Voice.lastUser = o.optJSONObject("user_transcription_event")
+                "user_transcript" -> {
+                    val t = o.optJSONObject("user_transcription_event")
                         ?.optString("user_transcript") ?: ""
-                "agent_response" ->
-                    Voice.lastAgent = o.optJSONObject("agent_response_event")
+                    Voice.lastUser = t
+                    Memory.heard("Γιάννης", t)
+                }
+                "agent_response" -> {
+                    val t = o.optJSONObject("agent_response_event")
                         ?.optString("agent_response") ?: ""
+                    Voice.lastAgent = t
+                    Memory.heard("Αίας", t)
+                }
             }
         } catch (e: Throwable) {
             Log.w(TAG, "ακατανόητο μήνυμα", e)

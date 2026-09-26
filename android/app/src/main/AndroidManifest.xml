@@ -121,5 +121,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Για το κουμπί «Στείλε την ηχογράφηση». Οι ηχογραφήσεις ζουν σε
+             φάκελο που ο διαχειριστής αρχείων του Android δεν δείχνει· χωρίς
+             αυτό, η καθαρή φωνή του ΑΙΑΝΤΑ έβγαινε μόνο με καλώδιο και adb. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

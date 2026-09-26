@@ -29,9 +29,34 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
      */
     private val nav = NavState(carContext)
 
+
+    /**
+     * Η ετικέτα αλλάζει και ΧΩΡΙΣ πάτημα.
+     *
+     * Ως τώρα ανανεωνόταν μόνο τρεις φορές μετά από πάτημα. Όταν τα credits
+     * τελείωσαν στο πέμπτο λεπτό μιας διαδρομής, το κουμπί έγραφε «Σταμάτα»
+     * ενώ δεν ακουγόταν τίποτα. Εδώ κοιτάζουμε κάθε δύο δευτερόλεπτα και
+     * ανανεώνουμε **μόνο αν άλλαξε το κείμενο** — δηλαδή σπάνια, στις αλλαγές
+     * κατάστασης, όχι σε κάθε κύκλο. Ο host μετράει τις ανανεώσεις.
+     */
+    private val ticker = android.os.Handler(android.os.Looper.getMainLooper())
+    private var shown = ""
+    private val watch = object : Runnable {
+        override fun run() {
+            if (label() != shown) invalidate()
+            ticker.postDelayed(this, 2000)
+        }
+    }
+
     init {
         lifecycle.addObserver(renderer)
         lifecycle.addObserver(nav)
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) { ticker.post(watch) }
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                ticker.removeCallbacks(watch)
+            }
+        })
     }
 
     private fun micGranted(): Boolean =
@@ -73,6 +98,7 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
         if (!Voice.active) return "Μίλα"
         val s = Voice.status
         return when {
+            s.startsWith("τέλος credits") -> "Τέλος credits"
             s.startsWith("χωρίς ίντερνετ") -> "Χωρίς ίντερνετ"
             s.startsWith("σφάλμα") -> "Σφάλμα σύνδεσης"
             s.startsWith("σύνδεση") -> "Συνδέεται…"
@@ -80,13 +106,18 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
         }
     }
 
-    override fun onGetTemplate(): Template =
+    override fun onGetTemplate(): Template {
+        shown = label()
+        return buildTemplate()
+    }
+
+    private fun buildTemplate(): Template =
         NavigationTemplate.Builder()
             .setActionStrip(
                 ActionStrip.Builder()
                     .addAction(
                         Action.Builder()
-                            .setTitle(label())
+                            .setTitle(shown)
                             .setOnClickListener { toggleVoice() }
                             .build()
                     )

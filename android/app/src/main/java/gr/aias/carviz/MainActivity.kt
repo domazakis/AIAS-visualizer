@@ -76,6 +76,56 @@ class MainActivity : AppCompatActivity() {
         refresh()
     }
 
+
+    /**
+     * Η νεότερη ηχογράφηση, στο μενού «Κοινή χρήση».
+     *
+     * ΟΧΙ ΕΝΩ ΓΡΑΦΕΤΑΙ. Η κεφαλίδα του WAV γράφεται με μηδενικά μεγέθη και
+     * διορθώνεται στο κλείσιμο· ένα αρχείο που στέλνεται στη μέση θα άνοιγε
+     * ως άδειο ή κατεστραμμένο στο πρόγραμμα μοντάζ.
+     */
+    private fun shareLast() {
+        val f = getExternalFilesDir(null)
+            ?.listFiles { x -> x.name.startsWith("aias-") && x.name.endsWith(".wav") }
+            ?.maxByOrNull { it.lastModified() }
+        if (f == null) { toast("Δεν υπάρχει ακόμη ηχογράφηση."); return }
+        if (Voice.active && Rec.path == f.absolutePath) {
+            toast("Γράφεται ακόμη. Σταμάτα πρώτα τη φωνή."); return
+        }
+        val mb = f.length() / (1024 * 1024)
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, f.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(send, "${f.name} · $mb MB"))
+    }
+
+    private fun showMemory() {
+        val n = Memory.notes(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Τι θυμάται ο ΑΙΑΣ (${n.size})")
+            .setMessage(if (n.isEmpty()) "Καμία σημείωση ακόμη." else n.joinToString("\n\n"))
+            .setPositiveButton("Εντάξει", null)
+            .setNegativeButton("Σβήσ' τα") { _, _ ->
+                // Μη αναστρέψιμο: δεύτερη ερώτηση.
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Να ξεχάσει όλες τις σημειώσεις;")
+                    .setMessage("Δεν γυρίζει πίσω. Ο ΑΙΑΣ θα ξεκινήσει σαν να σε γνωρίζει πρώτη φορά.")
+                    .setPositiveButton("Σβήσ' τα") { _, _ ->
+                        Memory.forget(this); toast("Η μνήμη σβήστηκε.")
+                    }
+                    .setNegativeButton("Άκυρο", null)
+                    .show()
+            }
+            .show()
+    }
+
+    private fun toast(s: String) =
+        android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tv = TextView(this).apply {
@@ -134,6 +184,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+
+        // ΣΤΕΙΛΕ ΤΗΝ ΤΕΛΕΥΤΑΙΑ ΗΧΟΓΡΑΦΗΣΗ. Ανοίγει το κανονικό μενού «Κοινή
+        // χρήση» του Android — Drive, Gmail, WhatsApp, ό,τι έχει το κινητό.
+        // Καμία σύνδεση λογαριασμού μέσα στην εφαρμογή· διαλέγεις εσύ πού.
+        val share = Button(this).apply {
+            text = "Στείλε την τελευταία ηχογράφηση"
+            setOnClickListener { shareLast() }
+        }
+
+        // ΤΙ ΘΥΜΑΤΑΙ Ο ΑΙΑΣ. Οι σημειώσεις που κράτησε μόνος του από τις
+        // προηγούμενες διαδρομές, με δυνατότητα να σβηστούν — οι δοκιμές
+        // γεμίζουν τη μνήμη με «μέτρα ως το δέκα» που δεν θέλεις στην εκπομπή.
+        val memory = Button(this).apply {
+            text = "Τι θυμάται ο ΑΙΑΣ"
+            setOnClickListener { showMemory() }
+        }
+
         val col = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             // Τα κουμπιά ΠΑΝΩ από το κείμενο. Ήταν από κάτω, και με τρεις
@@ -150,6 +217,8 @@ class MainActivity : AppCompatActivity() {
             addView(voice, lp())
             addView(probe, lp())
             addView(route, lp())
+            addView(share, lp())
+            addView(memory, lp())
             addView(tv)
             addView(pv)
         }
