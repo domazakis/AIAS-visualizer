@@ -37,8 +37,8 @@ android {
         applicationId = "gr.aias.carviz"
         minSdk = 24
         targetSdk = 36
-        versionCode = 44
-        versionName = "0.44"
+        versionCode = 45
+        versionName = "0.45"
         buildConfigField("String", "AGENT_ID", "\"$agentId\"")
     }
 
@@ -84,4 +84,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-common:2.8.4")
     // Το java.net.http.WebSocket θέλει API 33· εμείς στηρίζουμε από 24.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    testImplementation("junit:junit:4.13.2")
+    // Το org.json του android.jar είναι κούφιο έξω από συσκευή· αυτό είναι το αληθινό.
+    testImplementation("org.json:json:20240303")
 }

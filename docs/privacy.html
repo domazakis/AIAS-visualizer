@@ -57,10 +57,26 @@
       όχι συντεταγμένες.</li>
   <li>Αυτή η απάντηση πηγαίνει στην ElevenLabs μέσα στη συνομιλία και
       <strong>μένει στο κείμενο της συνομιλίας</strong> που κρατάει εκείνη.</li>
+  <li>Για να βρεθεί το όνομα του δρόμου, οι συντεταγμένες περνούν από την υπηρεσία
+      γεωκωδικοποίησης του Android (Google).</li>
   <li>Η τοποθεσία διαβάζεται μόνο όσο κρατάει η συνομιλία. Δεν χρησιμοποιείται
       ποτέ στο παρασκήνιο.</li>
   <li>Η άδεια είναι προαιρετική. Αν την αρνηθείς, η εφαρμογή λειτουργεί κανονικά
       και ο βοηθός απλώς δεν ξέρει πού είστε.</li>
+</ul>
+
+<h2>Καιρός</h2>
+<ul>
+  <li>Ο βοηθός μπορεί να ρωτήσει τον καιρό, <strong>μόνο όταν τον χρειάζεται για την
+      κουβέντα</strong>, για εκεί που βρίσκεστε ή για ένα μέρος που αναφέρατε.</li>
+  <li>Τότε η εφαρμογή στέλνει στη <strong>νορβηγική μετεωρολογική υπηρεσία
+      (MET Norway, api.met.no)</strong> συντεταγμένες <strong>στρογγυλεμένες στο
+      χιλιόμετρο</strong>. Αν ρωτήθηκε για άλλο μέρος, το όνομά του μετατρέπεται πρώτα σε
+      συντεταγμένες από την υπηρεσία γεωκωδικοποίησης του Android (Google).</li>
+  <li>Η πρόγνωση που επιστρέφει πηγαίνει στην ElevenLabs μέσα στη συνομιλία. Στη συσκευή
+      κρατιέται μόνο στη μνήμη, ως δύο ώρες, και δεν γράφεται πουθενά.</li>
+  <li>Τα δεδομένα καιρού είναι της MET Norway, με άδεια
+      <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</li>
 </ul>
 
 <h2>Σημειώσεις μνήμης</h2>
@@ -84,7 +100,9 @@
   <li>Δεν ζητάει λογαριασμό και δεν έχει σύνδεση χρήστη.</li>
   <li>Δεν χρησιμοποιεί επαφές, φωτογραφίες, ημερολόγιο ή μηνύματα.</li>
   <li>Δεν έχει διαφημίσεις, ούτε εργαλεία ανάλυσης ή παρακολούθησης.</li>
-  <li>Δεν πουλάει και δεν μοιράζεται δεδομένα με κανέναν πέρα από την ElevenLabs.</li>
+  <li>Δεν πουλάει δεδομένα, και δεν τα μοιράζεται με κανέναν πέρα από όσους λέει αυτή
+      η σελίδα: την ElevenLabs, τη MET Norway για τον καιρό, και την υπηρεσία
+      γεωκωδικοποίησης του Android.</li>
 </ul>
 
 <h2>Διαγνωστικά</h2>
@@ -142,9 +160,23 @@ voice assistant. This page states exactly what data it touches, when, and where 
       not coordinates.</li>
   <li>This answer goes to ElevenLabs as part of the conversation and <strong>remains in the
       conversation transcript</strong> that ElevenLabs keeps.</li>
+  <li>To find the street name, coordinates pass through Android’s geocoding service (Google).</li>
   <li>Location is read only while a conversation is running, never in the background.</li>
   <li>The permission is optional. If you decline, the app works normally and the assistant simply
       does not know where you are.</li>
+</ul>
+
+<h2>Weather</h2>
+<ul>
+  <li>The assistant may ask for the weather <strong>only when it needs it for the conversation</strong>,
+      for where you are or for a place you mentioned.</li>
+  <li>The app then sends <strong>coordinates rounded to about one kilometre</strong> to the
+      <strong>Norwegian Meteorological Institute (MET Norway, api.met.no)</strong>. For another place,
+      its name is first turned into coordinates by Android’s geocoding service (Google).</li>
+  <li>The forecast goes to ElevenLabs as part of the conversation. On the device it is kept only in
+      memory, for up to two hours, and never written anywhere.</li>
+  <li>Weather data by MET Norway, licensed under
+      <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</li>
 </ul>
 
 <h2>Memory notes</h2>
@@ -167,7 +199,8 @@ sent at the start of each conversation.</p>
   <li>No account, no sign-in.</li>
   <li>No contacts, photos, calendar or messages.</li>
   <li>No advertising, analytics or tracking.</li>
-  <li>No selling or sharing of data with anyone other than ElevenLabs.</li>
+  <li>No selling of data, and no sharing beyond those named on this page: ElevenLabs, MET Norway
+      for the weather, and Android’s geocoding service.</li>
 </ul>
 
 <h2>Diagnostics</h2>

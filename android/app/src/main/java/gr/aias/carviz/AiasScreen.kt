@@ -101,6 +101,9 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
         return when {
             s.startsWith("τέλος credits") -> "Τέλος credits"
             s.startsWith("ασταθές δίκτυο") -> "Ασταθές δίκτυο"
+            s.startsWith("όριο κλήσεων") -> "Όριο κλήσεων"
+            s.startsWith("άρνηση server") -> "Άρνηση server"
+            s.startsWith("σε αναμονή") -> "Σε αναμονή…"
             s.startsWith("χωρίς ίντερνετ") -> "Χωρίς ίντερνετ"
             s.startsWith("σφάλμα") -> "Σφάλμα σύνδεσης"
             s.startsWith("σύνδεση") -> "Συνδέεται…"

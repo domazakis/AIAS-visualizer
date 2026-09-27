@@ -61,6 +61,7 @@ class VoiceService : Service() {
         /** Το όνομα του εργαλείου, όπως δηλώνεται στην κονσόλα του ElevenLabs. */
         private const val TOOL_WHERE = "pou_eimaste"
         private const val TOOL_REMEMBER = "thymisou"
+        private const val TOOL_WEATHER = "kairos"
 
         private const val IN_RATE = 16000
 
@@ -148,6 +149,8 @@ class VoiceService : Service() {
     @Volatile private var talkedThisDrive = false
     /** Τέλος credits: καμία νέα προσπάθεια ως το επόμενο «Μίλα». */
     @Volatile private var noMoreRetries = false
+    /** Αρνήσεις του server στη σειρά, πριν από επιβεβαίωση — δες [refused]. */
+    @Volatile private var refusals = 0
     /** Ήρθε η επιβεβαίωση της συνομιλίας σε αυτή την προσπάθεια; */
     @Volatile private var started = false
     @Volatile private var openedAt = 0L
@@ -481,9 +484,10 @@ class VoiceService : Service() {
             if (!current(webSocket)) return
             Log.w(TAG, "αποτυχία WebSocket", t)
             live = null
-            if (quota(why) || response?.code == 402 || response?.code == 429) {
-                quotaStop(); return
-            }
+            if (quota(why) || response?.code == 402) { quotaStop(); return }
+            if (!started && (limit(why) || response?.code == 429)) { limitStop(why); return }
+            // Ο server απάντησε και αρνήθηκε — δεν είναι το δίκτυο.
+            if (response != null && refused("HTTP ${response.code} $why")) return
             rejectedVars()
             val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
             Voice.status = msg
@@ -504,6 +508,9 @@ class VoiceService : Service() {
             // κόπηκε στο 287ο δευτερόλεπτο με «This request exceeds your quota
             // limit», και η εφαρμογή ξαναδοκίμαζε ανά τρία δευτερόλεπτα.
             if (quota(reason)) { quotaStop(); return }
+            // 4300: έληξε η αναμονή στην ουρά, αν ανοίξει ποτέ η ουρά στην κονσόλα.
+            if (code == 4300 || (!started && limit(reason))) { limitStop("$code $reason"); return }
+            if (!started && refused("$code $reason")) return
             rejectedVars()
             Voice.status = "αποσυνδέθηκε"
             Voice.mode = "idle"
@@ -555,6 +562,47 @@ class VoiceService : Service() {
         Voice.status = "τέλος credits"
         Voice.mode = "idle"
         note("φωνή", "ο server έκλεισε: τέλος credits στο ElevenLabs — δεν ξαναδοκιμάζουμε")
+    }
+
+    /**
+     * ΤΑ ΟΡΙΑ ΤΟΥ AGENT (από 27/09/2026): δύο ταυτόχρονες συνεδρίες, τριάντα
+     * την ημέρα. Η τρίτη ταυτόχρονη και η τριακοστή πρώτη απορρίπτονται.
+     *
+     * Το ElevenLabs δεν τεκμηριώνει με τι λόγια απορρίπτει. Άρα δύο δίχτυα:
+     * οι λέξεις που περιμένουμε, και —για ό,τι δεν περιμένουμε— το [refused].
+     *
+     * Οι λέξεις μετράνε **μόνο πριν ξεκινήσει η συνομιλία**: τα όρια κόβουν
+     * στην είσοδο. Το κλείσιμο της ώρας (`max_duration_seconds`) μπορεί κι
+     * αυτό να γράφει «limit», και εκεί θέλουμε επανασύνδεση, όχι σιωπή.
+     */
+    private fun limit(s: String?): Boolean {
+        val t = s ?: return false
+        return t.contains("limit", true) || t.contains("concurren", true) ||
+            t.contains("daily", true) || t.contains("too many", true)
+    }
+
+    private fun limitStop(why: String) {
+        noMoreRetries = true
+        Voice.status = "όριο κλήσεων"
+        Voice.mode = "idle"
+        note("φωνή", "όριο κλήσεων του agent: ${why.take(90)} — δεν ξαναδοκιμάζουμε")
+        log("ΕΓΚΑΤΑΛΕΙΨΗ: όριο κλήσεων · ${why.take(90)}")
+    }
+
+    /**
+     * Ο server έκλεισε **πριν** επιβεβαιώσει τη συνομιλία, με λόγο που δεν
+     * αναγνωρίζουμε. Μία φορά μπορεί να είναι οι μεταβλητές ([rejectedVars]),
+     * δύο μπορεί να είναι σύμπτωση. Την τρίτη σταματάμε: ένα όριο που δεν
+     * ξέρουμε να διαβάσουμε δεν πρέπει να γίνει κύκλος που καίει το ημερήσιο.
+     */
+    private fun refused(why: String): Boolean {
+        if (++refusals < 3) return false
+        noMoreRetries = true
+        Voice.status = "άρνηση server"
+        Voice.mode = "idle"
+        note("φωνή", "ο server αρνήθηκε τρεις φορές: ${why.take(90)} — δεν ξαναδοκιμάζουμε")
+        log("ΕΓΚΑΤΑΛΕΙΨΗ: τρεις αρνήσεις · ${why.take(90)}")
+        return true
     }
 
     private fun retryLater() {
@@ -616,6 +664,7 @@ class VoiceService : Service() {
             when (o.optString("type")) {
                 "conversation_initiation_metadata" -> {
                     started = true
+                    refusals = 0
                     sessionStart = System.currentTimeMillis()
                     val cid = o.optJSONObject("conversation_initiation_metadata_event")
                         ?.optString("conversation_id") ?: "—"
@@ -633,6 +682,14 @@ class VoiceService : Service() {
                     val b64 = o.optJSONObject("audio_event")?.optString("audio_base_64")
                     if (!b64.isNullOrEmpty()) enqueue(b64)
                 }
+                // Η ουρά είναι κλειστή στην κονσόλα· αν ανοίξει, να φαίνεται.
+                "queue_status" -> {
+                    val st = o.optJSONObject("queue_status_event")?.optString("status") ?: ""
+                    log("ουρά: $st")
+                    note("φωνή", "ουρά: $st")
+                    if (st == "waiting") Voice.status = "σε αναμονή"
+                    if (st == "admitted") Voice.status = "συνδεδεμένος"
+                }
                 "ping" -> {
                     val id = o.optJSONObject("ping_event")?.optInt("event_id") ?: 0
                     webSocket.send(JSONObject().put("type", "pong").put("event_id", id).toString())
@@ -649,6 +706,17 @@ class VoiceService : Service() {
                     val id = c?.optString("tool_call_id") ?: ""
                     val name = c?.optString("tool_name") ?: ""
                     val params = c?.optJSONObject("parameters")
+                    toolCalls++
+                    // Ο καιρός χτυπάει δίκτυο, άρα δεν απαντά από αυτό το νήμα —
+                    // εδώ διαβάζεται ο ήχος. Δες [Weather].
+                    if (name == TOOL_WEATHER) {
+                        Weather.ask(this, params?.optString("topos")) { answer ->
+                            note("καιρός", Weather.status)
+                            // Αν στο μεταξύ άλλαξε η γραμμή, η απάντηση δεν έχει πού να πάει.
+                            if (webSocket === ws) toolResult(webSocket, id, answer, true)
+                        }
+                        return
+                    }
                     val known: Boolean
                     val answer: String
                     when (name) {
@@ -670,13 +738,7 @@ class VoiceService : Service() {
                             answer = "Δεν έχω τέτοιο εργαλείο."
                         }
                     }
-                    toolCalls++
-                    webSocket.send(JSONObject()
-                        .put("type", "client_tool_result")
-                        .put("tool_call_id", id)
-                        .put("result", answer)
-                        .put("is_error", !known)
-                        .toString())
+                    toolResult(webSocket, id, answer, known)
                 }
                 "interruption" -> {
                     // Ο χρήστης έκοψε τον agent: πετάμε ό,τι δεν παίχτηκε ακόμη,
@@ -704,6 +766,19 @@ class VoiceService : Service() {
             }
         } catch (e: Throwable) {
             Log.w(TAG, "ακατανόητο μήνυμα", e)
+        }
+    }
+
+    private fun toolResult(webSocket: WebSocket, id: String, answer: String, known: Boolean) {
+        try {
+            webSocket.send(JSONObject()
+                .put("type", "client_tool_result")
+                .put("tool_call_id", id)
+                .put("result", answer)
+                .put("is_error", !known)
+                .toString())
+        } catch (e: Throwable) {
+            Log.w(TAG, "δεν στάλθηκε η απάντηση εργαλείου", e)
         }
     }
 
