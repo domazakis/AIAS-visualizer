@@ -69,6 +69,7 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
      * τη δίνει από το κινητό — μία φορά στη ζωή της εγκατάστασης.
      */
     private fun toggleVoice() {
+        if (Voice.tooSoon()) return
         if (!micGranted()) {
             carContext.startService(Intent(carContext, VoiceService::class.java))
             invalidate()
@@ -99,6 +100,7 @@ class AiasScreen(carContext: CarContext) : Screen(carContext) {
         val s = Voice.status
         return when {
             s.startsWith("τέλος credits") -> "Τέλος credits"
+            s.startsWith("ασταθές δίκτυο") -> "Ασταθές δίκτυο"
             s.startsWith("χωρίς ίντερνετ") -> "Χωρίς ίντερνετ"
             s.startsWith("σφάλμα") -> "Σφάλμα σύνδεσης"
             s.startsWith("σύνδεση") -> "Συνδέεται…"

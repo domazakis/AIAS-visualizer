@@ -11,61 +11,82 @@ import java.util.Locale
  *
  * ΤΟ ElevenLabs ΔΕΝ ΘΥΜΑΤΑΙ ΤΙΠΟΤΑ ΜΟΝΟ ΤΟΥ. Κάθε συνομιλία ξεκινά από το μηδέν·
  * ο τεκμηριωμένος δρόμος για «μνήμη» είναι να του δίνει ο πελάτης το ιστορικό
- * στην αρχή, μέσα από μεταβλητή του prompt. Αυτό κάνουμε εδώ.
+ * στην αρχή, μέσα από τη μεταβλητή `{{memory}}` του prompt.
  *
- * 1. ΣΗΜΕΙΩΣΕΙΣ — μακροπρόθεσμες, στον δίσκο, από διαδρομή σε διαδρομή.
+ * 1. ΣΗΜΕΙΩΣΕΙΣ — από διαδρομή σε διαδρομή, στον δίσκο.
  *
- *    Δεν κρατάμε ολόκληρα τα απομαγνητοφωνημένα. Θα μεγάλωναν χωρίς όριο, και
- *    για να τα συμπυκνώσουμε θα χρειαζόμασταν γλωσσικό μοντέλο μέσα στην
- *    εφαρμογή. Αντ' αυτού **ο ίδιος ο ΑΙΑΣ διαλέγει τι αξίζει**: του δίνουμε
- *    εργαλείο «θυμήσου» και γράφει μόνος του μία πρόταση όταν κάτι αξίζει να
- *    το θυμάται σε ένα μήνα. Το μοντέλο κάνει τη σύνοψη· εμείς απλώς
- *    φυλάμε το σημειωματάριο.
+ *    Δεν κρατάμε απομαγνητοφωνημένα. Ο ίδιος ο ΑΙΑΣ διαλέγει τι αξίζει: έχει
+ *    εργαλείο `thymisou` και σημειώνει μία πρόταση όταν κάτι αξίζει να το
+ *    θυμάται σε ένα μήνα. Το μοντέλο κάνει τη σύνοψη, εμείς φυλάμε το
+ *    σημειωματάριο.
  *
- *    Και αυτό υπηρετεί έναν κανόνα που μέχρι τώρα δεν μπορούσε να τηρηθεί: *«Οι
- *    θέσεις σου δεν αλλάζουν από κουβέντα σε κουβέντα.»* Χωρίς μνήμη, κάθε
- *    κουβέντα ήταν η πρώτη.
+ *    Δεν αγγίζουμε το «Τετράδιο Αία» της κονσόλας (knowledge base) με τα
+ *    σταθερά στοιχεία για τον Γιάννη. Εδώ μπαίνει μόνο ό,τι σημειώνει ο ίδιος.
  *
- * 2. ΠΡΟΣΦΑΤΑ — βραχυπρόθεσμα, μόνο στη μνήμη, μόνο για αυτή τη διαδρομή.
+ * 2. ΠΡΟΣΦΑΤΑ — μόνο για την τρέχουσα διαδρομή, μόνο στη μνήμη.
  *
- *    Αν κοπεί το δίκτυο, η επανασύνδεση είναι ΚΑΙΝΟΥΡΓΙΑ συνομιλία. Χωρίς
- *    αυτό, στο εικοστό λεπτό του επεισοδίου θα έλεγε «Γεια και χαρά!» σαν να
- *    μην είχατε μιλήσει ποτέ. Εδώ κρατάμε αυτολεξεί τις τελευταίες ατάκες και
- *    του τις ξαναδίνουμε — συνεχίζει από εκεί που έμεινε.
+ *    Αν κοπεί το δίκτυο, η επανασύνδεση είναι καινούργια συνομιλία. Χωρίς
+ *    αυτό θα έλεγε «Γεια και χαρά!» στο εικοστό λεπτό. Κρατάμε αυτολεξεί τις
+ *    τελευταίες ατάκες και του τις ξαναδίνουμε.
+ *
+ * ΤΟ ΤΑΒΑΝΙ ΤΩΝ 800 ΧΑΡΑΚΤΗΡΩΝ — ΚΑΙ ΓΙΑΤΙ ΕΙΝΑΙ ΤΟΣΟ ΧΑΜΗΛΟ.
+ *
+ * Το `{{memory}}` μπαίνει στο prompt και το prompt ξαναστέλνεται σε ΚΑΘΕ
+ * γύρο της κουβέντας. Το ElevenLabs γράφει ότι πάνω από 2.000 tokens
+ * ανεβαίνουν η καθυστέρηση και το κόστος. Το prompt v31 μαζί με το «Τετράδιο
+ * Αία» είναι ήδη περίπου 1.670. Μένουν ~800 χαρακτήρες, δηλαδή δέκα με
+ * δώδεκα σύντομες προτάσεις.
+ *
+ * Όταν γεμίσει, φεύγουν οι παλαιότερες. Ό,τι βλέπεις στην οθόνη «Τι θυμάται ο
+ * ΑΙΑΣ» είναι ακριβώς ό,τι του δίνεται — όχι ένα μεγαλύτερο αρχείο από το
+ * οποίο στέλνεται ένα κομμάτι.
  */
 object Memory {
 
     private const val FILE = "memory.txt"
 
-    /** Όριο σημειώσεων σε χαρακτήρες· τις παλαιότερες τις ξεχνάει πρώτες. */
-    private const val NOTES_MAX = 6000
+    /** Όλο το `{{memory}}`, σε χαρακτήρες. */
+    const val BUDGET = 800
 
-    /** Όριο των πρόσφατων ατάκων για την επανασύνδεση. */
-    private const val RECENT_MAX = 2500
+    /** Όσο παίρνουν τα πρόσφατα σε επανασύνδεση· οι σημειώσεις μοιράζονται τα υπόλοιπα. */
+    private const val RECENT_BUDGET = 350
+
+    /** Μια σημείωση είναι μία πρόταση. Αν ξεφύγει, κόβεται. */
+    private const val NOTE_MAX = 160
+
+    private const val EMPTY = "Τίποτα ακόμα."
 
     private val recent = ArrayDeque<String>()
-    private var recentChars = 0
 
     // ------------------------------------------------------------ σημειώσεις
 
-    /** Καλείται από το εργαλείο `thymisou`. Επιστρέφει την απάντηση προς τον agent. */
+    /**
+     * Καλείται από το εργαλείο `thymisou`, που ΠΕΡΙΜΕΝΕΙ απάντηση — άρα
+     * επιστρέφει αμέσως κάτι σύντομο. Ο δίσκος εδώ είναι ένα μικρό αρχείο.
+     */
     @Synchronized
     fun remember(ctx: Context, text: String): String {
-        val t = text.trim().replace('\n', ' ')
+        val t = text.trim().replace('\n', ' ').take(NOTE_MAX)
         if (t.isEmpty()) return "Δεν υπήρχε κάτι να κρατήσω."
         val lines = read(ctx).toMutableList()
         // Ίδια σημείωση δύο φορές δεν προσθέτει τίποτα· μόνο θόρυβο.
         if (lines.any { it.substringAfter(": ", it).equals(t, ignoreCase = true) })
             return "Το είχα ήδη."
         lines += "${stamp()}: $t"
-        // Κόβουμε από την αρχή ώσπου να χωρέσει.
-        while (lines.sumOf { it.length + 1 } > NOTES_MAX && lines.size > 1) lines.removeAt(0)
+        while (chars(lines) > BUDGET && lines.size > 1) lines.removeAt(0)
         write(ctx, lines)
-        return "Το κράτησα."
+        return "Σημειώθηκε."
     }
 
     @Synchronized
     fun notes(ctx: Context): List<String> = read(ctx)
+
+    /** «4 σημειώσεις · 312/800» — για τα διαγνωστικά και την οθόνη μνήμης. */
+    @Synchronized
+    fun size(ctx: Context): String {
+        val n = read(ctx)
+        return "${n.size} σημειώσεις · ${chars(n)}/$BUDGET"
+    }
 
     @Synchronized
     fun forget(ctx: Context) {
@@ -74,25 +95,18 @@ object Memory {
 
     // --------------------------------------------------------------- πρόσφατα
 
-    /** Κάθε ατάκα που ειπώθηκε, από όποια μεριά. */
     @Synchronized
     fun heard(who: String, text: String) {
         val t = text.trim()
         if (t.isEmpty() || t == "...") return
-        val line = "$who: $t"
-        recent.addLast(line)
-        recentChars += line.length + 1
-        while (recentChars > RECENT_MAX && recent.size > 1) {
-            recentChars -= recent.removeFirst().length + 1
-        }
+        recent.addLast("$who: $t")
+        // Κρατάμε λίγο παραπάνω από όσα θα στείλουμε· το κόψιμο γίνεται στο payload.
+        while (recent.sumOf { it.length + 1 } > RECENT_BUDGET * 2 && recent.size > 1)
+            recent.removeFirst()
     }
 
-    /** Μία διαδρομή τελείωσε· τα πρόσφατα δεν έχουν θέση στην επόμενη. */
     @Synchronized
-    fun endDrive() {
-        recent.clear()
-        recentChars = 0
-    }
+    fun endDrive() = recent.clear()
 
     @Synchronized
     fun hasRecent(): Boolean = recent.isNotEmpty()
@@ -100,26 +114,37 @@ object Memory {
     // --------------------------------------------------- ό,τι φεύγει στον agent
 
     /**
-     * Το κείμενο της μεταβλητής `{{memory}}`. **Ποτέ κενό**: η τεκμηρίωση του
-     * ElevenLabs δεν λέει τι γίνεται αν το prompt ζητά μεταβλητή που λείπει,
-     * και δεν θέλουμε να το μάθουμε μέσα σε λήψη.
+     * Το κείμενο του `{{memory}}`. Χωρίς επικεφαλίδα — την έχει ήδη το prompt
+     * («Όσα έχεις σημειώσει ο ίδιος από προηγούμενες κουβέντες:»). Ποτέ κενό.
+     * Ποτέ πάνω από [BUDGET].
      */
     @Synchronized
     fun payload(ctx: Context, reconnect: Boolean): String {
-        val sb = StringBuilder()
-        val n = read(ctx)
-        if (n.isEmpty()) sb.append("Δεν έχεις σημειώσεις από προηγούμενες διαδρομές.")
-        else {
-            sb.append("Σημειώσεις σου από προηγούμενες διαδρομές:\n")
-            n.forEach { sb.append("- ").append(it).append('\n') }
+        val tail = if (reconnect && recent.isNotEmpty()) recentBlock() else ""
+        val room = BUDGET - tail.length - 1
+        // Οι νεότερες σημειώσεις έχουν προτεραιότητα αν δεν χωράνε όλες.
+        val kept = ArrayDeque<String>()
+        var used = 0
+        for (line in read(ctx).asReversed()) {
+            if (used + line.length + 1 > room) break
+            kept.addFirst(line); used += line.length + 1
         }
-        if (reconnect && recent.isNotEmpty()) {
-            sb.append("\nΗ γραμμή κόπηκε πριν από λίγο, μέσα στην ίδια διαδρομή. ")
-                .append("Οι τελευταίες ατάκες ήταν:\n")
-            recent.forEach { sb.append(it).append('\n') }
-            sb.append("Συνέχισε από εκεί. Μη χαιρετήσεις ξανά σαν να ξεκινάτε.")
+        val head = if (kept.isEmpty()) EMPTY else kept.joinToString("\n")
+        return if (tail.isEmpty()) head else "$head\n$tail"
+    }
+
+    /** Οι τελευταίες ατάκες, όσες χωράνε, με μια οδηγία να συνεχίσει. */
+    private fun recentBlock(): String {
+        val intro = "Κόπηκε η γραμμή μέσα στην ίδια διαδρομή. Τελευταίες ατάκες:"
+        val outro = "Συνέχισε από εκεί, χωρίς να ξαναχαιρετήσεις."
+        val room = RECENT_BUDGET - intro.length - outro.length - 2
+        val kept = ArrayDeque<String>()
+        var used = 0
+        for (line in recent.reversed()) {
+            if (used + line.length + 1 > room) break
+            kept.addFirst(line); used += line.length + 1
         }
-        return sb.toString().trim()
+        return (listOf(intro) + kept + outro).joinToString("\n")
     }
 
     /** Το πρώτο που λέει. Στην επανασύνδεση, κάτι που ταιριάζει σε επανασύνδεση. */
@@ -127,6 +152,8 @@ object Memory {
         if (reconnect) "Κόπηκε η γραμμή. Λέγε." else "Γεια και χαρά!"
 
     // --------------------------------------------------------------- δίσκος
+
+    private fun chars(lines: List<String>) = lines.sumOf { it.length + 1 }
 
     private fun read(ctx: Context): List<String> = try {
         val f = File(ctx.filesDir, FILE)
@@ -138,5 +165,6 @@ object Memory {
         catch (e: Throwable) { }
     }
 
-    private fun stamp(): String = SimpleDateFormat("dd/MM/yyyy", Locale.US).format(Date())
+    /** Σύντομη ημερομηνία: κάθε χαρακτήρας εδώ κοστίζει σε κάθε γύρο. */
+    private fun stamp(): String = SimpleDateFormat("dd/MM", Locale.US).format(Date())
 }

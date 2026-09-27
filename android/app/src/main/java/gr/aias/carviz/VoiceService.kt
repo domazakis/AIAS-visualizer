@@ -108,7 +108,18 @@ class VoiceService : Service() {
         }
     }
 
-    private var ws: WebSocket? = null
+    @Volatile private var ws: WebSocket? = null
+    /** Ο ακροατής της τρέχουσας γραμμής — για να περιμένουμε το κλείσιμό της. */
+    private var listener: Conn? = null
+    private val connLock = Any()
+    /** Οι στιγμές των τελευταίων προσπαθειών, για το ταβάνι. */
+    private val attempts = ArrayDeque<Long>()
+    /** Αποτυχίες στη σειρά, για την κλιμακωτή αναμονή. */
+    private var failStreak = 0
+    /** Πότε επιβεβαίωσε ο server την τρέχουσα συνεδρία. */
+    @Volatile private var sessionStart = 0L
+    /** Πόσες γραμμές είναι ανοιχτές αυτή τη στιγμή. Πρέπει να είναι πάντα 0 ή 1. */
+    private val openSockets = java.util.concurrent.atomic.AtomicInteger(0)
     private val retrying = AtomicBoolean(false)
     /** Πόσες φορές δοκιμάστηκε σύνδεση — μπαίνει στα διαγνωστικά. */
     private var attempt = 0
@@ -198,9 +209,27 @@ class VoiceService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Ο χρήστης έσυρε την εφαρμογή έξω από τις πρόσφατες: τέλος, κανονικά.
+     *
+     * Όχι όμως όταν η εφαρμογή απλώς πάει στο παρασκήνιο. Στο αυτοκίνητο το
+     * κινητό είναι ΠΑΝΤΑ στο παρασκήνιο — η οθόνη είναι του αυτοκινήτου — και
+     * ένας τέτοιος κανόνας θα έκλεινε τον ΑΙΑΝΤΑ τη στιγμή που βάζεις το
+     * καλώδιο.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        log("η εφαρμογή έκλεισε από τις πρόσφατες")
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         running = false
-        try { ws?.close(1000, "τέλος") } catch (e: Throwable) { }
+        val last: WebSocket?
+        synchronized(connLock) { last = ws; ws = null; listener = null }
+        try { last?.close(1000, "τέλος") } catch (e: Throwable) { }
+        if (live === last) live = null
+        log("τέλος υπηρεσίας")
         try { recorder?.stop(); recorder?.release() } catch (e: Throwable) { }
         try { track?.stop(); track?.release() } catch (e: Throwable) { }
         abandonFocus()
@@ -295,6 +324,41 @@ class VoiceService : Service() {
 
     // ------------------------------------------------------------ σύνδεση
 
+    // ------------------------------------------------------------ σύνδεση
+
+    /**
+     * ΜΙΑ ΣΥΝΕΔΡΙΑ ΤΗ ΦΟΡΑ — ΚΑΙ ΤΙ ΚΟΣΤΙΣΕ ΟΣΟ ΔΕΝ ΙΣΧΥΕ.
+     *
+     * 21/09, 15:31: ο server κατέγραψε 23 συνεδρίες σε έξι λεπτά και ως επτά
+     * ταυτόχρονες, χρεωμένες όλες — περίπου δεκαέξι λεπτά πληρωμένα για
+     * επικαλύψεις. Ο μηχανισμός βγαίνει από τα ίδια τα νούμερα. Το δίκτυο
+     * έπεφτε και ερχόταν. Κάθε φορά που μια γραμμή πέθαινε —το ping δεν έπαιρνε
+     * απάντηση σε 20 δευτερόλεπτα— εμείς την εγκαταλείπαμε και σε 3
+     * δευτερόλεπτα ανοίγαμε καινούργια. Η παλιά όμως δεν είχε κλείσει στον
+     * server, αφού το κλείσιμο δεν μπορούσε να φτάσει εκεί, και ο server την
+     * κρατούσε ένα με δύο λεπτά μέχρι να το καταλάβει. Ένας κύκλος κάθε ~20
+     * δευτερόλεπτα, και κάθε νεκρή γραμμή να ζει ~2 λεπτά: επτά ταυτόχρονες.
+     *
+     * Τρία πράγματα το σπάνε:
+     *
+     * - ΚΛΙΜΑΚΩΤΗ ΑΝΑΜΟΝΗ: 3, 10, 30, 60 δευτερόλεπτα αντί για 3 πάντα. Όσο
+     *   πιο συχνά αποτυγχάνει, τόσο περισσότερο χρόνο δίνουμε στον server να
+     *   θάψει την προηγούμενη.
+     * - ΤΑΒΑΝΙ: έξι προσπάθειες σε πέντε λεπτά και σταματάμε, με «Ασταθές
+     *   δίκτυο» στο κουμπί. Ένα κακό κομμάτι δρόμου δεν μπορεί πια να κοστίσει
+     *   περισσότερες από έξι συνεδρίες, ό,τι κι αν γίνει.
+     * - ΚΑΘΑΡΟ ΚΛΕΙΣΙΜΟ ΠΡΙΝ ΤΟ ΝΕΟ: η παλιά γραμμή κλείνει κανονικά και
+     *   περιμένουμε ως τρία δευτερόλεπτα την επιβεβαίωση. Αν το δίκτυο ζει, ο
+     *   server την κλείνει αμέσως αντί να την κρατάει.
+     *
+     * Και ένα όριο που δεν ξεπερνιέται από τον πελάτη: αν το δίκτυο είναι νεκρό
+     * τη στιγμή της αποχώρησης, ο server δεν μαθαίνει τίποτα ώσπου να λήξει μόνος
+     * του. Αυτό δεν διορθώνεται· μόνο περιορίζεται, και το κάνουν τα παραπάνω.
+     *
+     * Μέσα στον πελάτη, εγγυημένα: ποτέ δύο ανοιχτές γραμμές. Ό,τι φτάνει από
+     * γραμμή που δεν είναι πια η τρέχουσα αγνοείται — αλλιώς ένα καθυστερημένο
+     * «έκλεισε» μιας παλιάς θα έφερνε επανασύνδεση ενώ η καινούργια ζει.
+     */
     private fun connect() {
         val id = BuildConfig.AGENT_ID
         if (id.isBlank()) {
@@ -311,73 +375,140 @@ class VoiceService : Service() {
             retryLater()
             return
         }
-        val url = "wss://api.elevenlabs.io/v1/convai/conversation?agent_id=$id"
-        Voice.status = "σύνδεση…"
-        note("δίκτυο", "${networkNote()} · προσπάθεια ${++attempt}")
-        ws = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
+        synchronized(connLock) {
+            if (ws != null) { log("ζητήθηκε σύνδεση ενώ υπάρχει ανοιχτή — αγνοείται"); return }
+            if (!budget()) return
+            val url = "wss://api.elevenlabs.io/v1/convai/conversation?agent_id=$id"
+            Voice.status = "σύνδεση…"
+            note("δίκτυο", "${networkNote()} · προσπάθεια ${++attempt}")
+            val l = Conn()
+            listener = l
+            ws = client.newWebSocket(Request.Builder().url(url).build(), l)
+            log("σύνδεση · προσπάθεια $attempt")
+        }
+    }
 
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "συνδέθηκε")
-                live = webSocket
+    /** Έξι προσπάθειες σε πέντε λεπτά, όχι παραπάνω. */
+    private fun budget(): Boolean {
+        val now = System.currentTimeMillis()
+        while (attempts.isNotEmpty() && now - attempts.first() > 300_000L) attempts.removeFirst()
+        if (attempts.size >= 6) {
+            noMoreRetries = true
+            Voice.status = "ασταθές δίκτυο"
+            Voice.mode = "idle"
+            note("φωνή", "έξι προσπάθειες σε πέντε λεπτά — σταματάμε, για να μη χρεώνονται συνεδρίες")
+            log("ΕΓΚΑΤΑΛΕΙΨΗ: ταβάνι προσπαθειών")
+            return false
+        }
+        attempts.addLast(now)
+        return true
+    }
 
-                Voice.status = "συνδεδεμένος"
-                Voice.mode = "listen"
-                note("φωνή", "συνδεδεμένος στον agent")
+    /**
+     * Ο ακροατής ΜΙΑΣ γραμμής. Κάθε σύνδεση έχει τον δικό της· ό,τι λέει μια
+     * γραμμή που δεν είναι πια η τρέχουσα, δεν αγγίζει την κατάσταση.
+     */
+    private inner class Conn : WebSocketListener() {
 
-                // ΜΝΗΜΗ ΚΑΙ ΣΥΝΕΧΕΙΑ. Δες [Memory]. Επανασύνδεση σημαίνει ότι
-                // σε αυτή την ίδια διαδρομή είχε ήδη γίνει κουβέντα — τότε του
-                // δίνουμε και τις τελευταίες ατάκες και άλλον χαιρετισμό.
-                val reconnect = talkedThisDrive && Memory.hasRecent()
-                talkedThisDrive = true
-                note("μνήμη", "%d σημειώσεις · %s".format(
-                    Memory.notes(this@VoiceService).size,
-                    if (reconnect) "επανασύνδεση, με τα πρόσφατα" else "νέα διαδρομή"))
-                started = false
-                openedAt = System.nanoTime()
-                val init = JSONObject().put("type", "conversation_initiation_client_data")
-                if (!noVars) init.put("dynamic_variables", JSONObject()
-                    .put("memory", Memory.payload(this@VoiceService, reconnect))
-                    .put("greeting", Memory.greeting(reconnect)))
-                webSocket.send(init.toString())
+        /** Πέφτει όταν η γραμμή τελειώσει οριστικά, με όποιον τρόπο. */
+        val done = java.util.concurrent.CountDownLatch(1)
+        @Volatile private var opened = false
+
+        /**
+         * Ο έλεγχος περιμένει το ίδιο κλείδωμα με τη [connect]: αλλιώς ένα πολύ
+         * γρήγορο άνοιγμα θα έφτανε πριν γραφτεί το `ws`, και θα κλείναμε τη
+         * δική μας καινούργια γραμμή ως «παλιά».
+         */
+        private fun current(w: WebSocket) = synchronized(connLock) { w === ws }
+
+        private fun finished() {
+            if (done.count > 0L) {
+                done.countDown()
+                if (opened) openSockets.decrementAndGet()
             }
+        }
 
-            override fun onMessage(webSocket: WebSocket, text: String) = handle(webSocket, text)
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.w(TAG, "αποτυχία WebSocket", t)
-                // Το `t.message` είναι συχνά κενό· η κλάση λέει πάντα κάτι.
-                live = null
-
-                val why = t.message ?: t.javaClass.simpleName
-                if (quota(why) || response?.code == 402 || response?.code == 429) {
-                    quotaStop(); return
-                }
-                rejectedVars()
-                val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
-                Voice.status = msg
-                Voice.mode = "idle"
-                note("φωνή", msg)
-                note("δίκτυο", networkNote() + " · απέτυχε: $why")
-                retryLater()
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            opened = true
+            val n = openSockets.incrementAndGet()
+            if (!current(webSocket)) {
+                log("άνοιξε γραμμή που δεν είναι πια τρέχουσα — κλείνει")
+                webSocket.close(1000, "παλιά")
+                return
             }
+            log("άνοιγμα · ανοιχτές γραμμές $n")
+            Log.i(TAG, "συνδέθηκε")
+            live = webSocket
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                live = null
-                Log.i(TAG, "έκλεισε: $code $reason")
-                note("δίκτυο", "έκλεισε $code ${reason.take(90)}")
-                // ΤΕΛΟΣ CREDITS: ΔΕΝ ΞΑΝΑΔΟΚΙΜΑΖΟΥΜΕ, ΤΟ ΛΕΜΕ.
-                //
-                // Στις 23/09 η συνομιλία κόπηκε στο 287ο δευτερόλεπτο με «This
-                // request exceeds your quota limit», και η εφαρμογή απλώς
-                // ξαναδοκίμαζε ανά τρία δευτερόλεπτα, αποτυγχάνοντας κάθε φορά.
-                // Στο αυτοκίνητο οι τελείες πάγωναν χωρίς εξήγηση.
-                if (quota(reason)) { quotaStop(); return }
-                rejectedVars()
-                Voice.status = "αποσυνδέθηκε"
-                Voice.mode = "idle"
-                retryLater()
+            Voice.status = "συνδεδεμένος"
+            Voice.mode = "listen"
+            note("φωνή", "συνδεδεμένος στον agent")
+
+            // ΜΝΗΜΗ ΚΑΙ ΣΥΝΕΧΕΙΑ. Δες [Memory]. Επανασύνδεση σημαίνει ότι σε αυτή
+            // την ίδια διαδρομή είχε ήδη γίνει κουβέντα — τότε του δίνουμε και
+            // τις τελευταίες ατάκες και άλλον χαιρετισμό.
+            val reconnect = talkedThisDrive && Memory.hasRecent()
+            talkedThisDrive = true
+            note("μνήμη", "%s · %s".format(
+                Memory.size(this@VoiceService),
+                if (reconnect) "επανασύνδεση, με τα πρόσφατα" else "νέα διαδρομή"))
+            started = false
+            openedAt = System.nanoTime()
+            val init = JSONObject().put("type", "conversation_initiation_client_data")
+            if (!noVars) init.put("dynamic_variables", JSONObject()
+                .put("memory", Memory.payload(this@VoiceService, reconnect))
+                .put("greeting", Memory.greeting(reconnect)))
+            webSocket.send(init.toString())
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            if (current(webSocket)) handle(webSocket, text)
+        }
+
+        /**
+         * Ο server κλείνει: απαντάμε ΑΜΕΣΩΣ. Χωρίς αυτό η OkHttp περιμένει
+         * εξήντα δευτερόλεπτα πριν θεωρήσει τη γραμμή κλειστή, και σε αυτό το
+         * διάστημα ο server βλέπει μια συνεδρία μισάνοιχτη.
+         */
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            try { webSocket.close(1000, null) } catch (e: Throwable) { }
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            finished()
+            val why = t.message ?: t.javaClass.simpleName
+            log("αποτυχία: $why · ανοιχτές γραμμές ${openSockets.get()}")
+            if (!current(webSocket)) return
+            Log.w(TAG, "αποτυχία WebSocket", t)
+            live = null
+            if (quota(why) || response?.code == 402 || response?.code == 429) {
+                quotaStop(); return
             }
-        })
+            rejectedVars()
+            val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
+            Voice.status = msg
+            Voice.mode = "idle"
+            note("φωνή", msg)
+            note("δίκτυο", networkNote() + " · απέτυχε: $why")
+            retryLater()
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            finished()
+            log("κλείσιμο $code ${reason.take(90)} · ανοιχτές γραμμές ${openSockets.get()}")
+            if (!current(webSocket)) return
+            live = null
+            Log.i(TAG, "έκλεισε: $code $reason")
+            note("δίκτυο", "έκλεισε $code ${reason.take(90)}")
+            // ΤΕΛΟΣ CREDITS: ΔΕΝ ΞΑΝΑΔΟΚΙΜΑΖΟΥΜΕ, ΤΟ ΛΕΜΕ. Στις 23/09 η συνομιλία
+            // κόπηκε στο 287ο δευτερόλεπτο με «This request exceeds your quota
+            // limit», και η εφαρμογή ξαναδοκίμαζε ανά τρία δευτερόλεπτα.
+            if (quota(reason)) { quotaStop(); return }
+            rejectedVars()
+            Voice.status = "αποσυνδέθηκε"
+            Voice.mode = "idle"
+            retryLater()
+        }
     }
 
     /**
@@ -430,14 +561,53 @@ class VoiceService : Service() {
         // Η αποτυχία φτάνει και από το `onFailure` και από το `onClosed`· χωρίς
         // τον μανδαλωτή θα ξεκινούσαν δύο προσπάθειες για το ίδιο πράγμα.
         if (!running || noMoreRetries || !retrying.compareAndSet(false, true)) return
+        // Μια συνεδρία που κράτησε πάνω από λεπτό ήταν υγιής· η επόμενη αποτυχία
+        // ξεκινά από την αρχή της κλίμακας, όχι από το εξηντάρι.
+        if (sessionStart != 0L && System.currentTimeMillis() - sessionStart > 60_000L) failStreak = 0
+        // Η κλίμακα ισχύει μόνο όταν ΥΠΑΡΧΕΙ δίκτυο. Χωρίς δίκτυο δεν ανοίγει
+        // συνεδρία, άρα δεν χρεώνεται τίποτα — και δεν έχει νόημα να περιμένεις
+        // ένα λεπτό αφού άνοιξες το hotspot. Ούτε μετράει στο ταβάνι: το
+        // [budget] ελέγχεται μόνο αφού βρεθεί δίκτυο.
+        val offline = !online()
+        val steps = longArrayOf(3_000L, 10_000L, 30_000L, 60_000L)
+        val wait = if (offline) 3_000L else steps[minOf(failStreak, steps.size - 1)]
+        if (!offline) failStreak++
+        note("δίκτυο", "νέα προσπάθεια σε ${wait / 1000} δευτ.")
         Thread({
-            try { Thread.sleep(3000) } catch (e: InterruptedException) { }
+            // Πρώτα κλείνει καθαρά η παλιά, και περιμένουμε την επιβεβαίωση.
+            val old: WebSocket?
+            val oldL: Conn?
+            synchronized(connLock) {
+                old = ws; oldL = listener
+                ws = null; listener = null
+            }
+            if (old != null) {
+                try { old.close(1000, "επανασύνδεση") } catch (e: Throwable) { }
+                try { oldL?.done?.await(3, TimeUnit.SECONDS) } catch (e: InterruptedException) { }
+                try { old.cancel() } catch (e: Throwable) { }
+            }
+            try { Thread.sleep(wait) } catch (e: InterruptedException) { }
             retrying.set(false)
-            if (!running) return@Thread
-            try { ws?.cancel() } catch (e: Throwable) { }
-            ws = null
+            if (!running || noMoreRetries) return@Thread
             connect()
         }, "aias-retry").start()
+    }
+
+    /**
+     * Το ημερολόγιο των συνεδριών, για να φαίνεται ότι τρέχει πάντα μία.
+     *
+     * Κάθε άνοιγμα, επιβεβαίωση με το `conversation_id` του server, κλείσιμο
+     * και αποτυχία, μαζί με το πόσες γραμμές είναι ανοιχτές εκείνη τη στιγμή.
+     * Αν ο αριθμός περάσει ποτέ το ένα, φαίνεται εδώ πριν φανεί στον λογαριασμό.
+     */
+    private fun log(event: String) {
+        Log.i(TAG, "συνεδρία: $event")
+        try {
+            val dir = getExternalFilesDir(null) ?: return
+            val t = java.text.SimpleDateFormat("dd/MM HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+            java.io.File(dir, "sessions.log").appendText("$t  $event\n")
+        } catch (e: Throwable) { }
     }
 
     private fun handle(webSocket: WebSocket, text: String) {
@@ -446,6 +616,11 @@ class VoiceService : Service() {
             when (o.optString("type")) {
                 "conversation_initiation_metadata" -> {
                     started = true
+                    sessionStart = System.currentTimeMillis()
+                    val cid = o.optJSONObject("conversation_initiation_metadata_event")
+                        ?.optString("conversation_id") ?: "—"
+                    log("επιβεβαίωση $cid · ανοιχτές γραμμές ${openSockets.get()}")
+                    note("συνεδρία", "$cid · ανοιχτές ${openSockets.get()} · προσπάθεια $attempt")
                     val m = o.optJSONObject("conversation_initiation_metadata_event")
                     // π.χ. "pcm_44100" — ο agent διαλέγει, εμείς προσαρμοζόμαστε.
                     val fmt = m?.optString("agent_output_audio_format") ?: "pcm_16000"
@@ -486,9 +661,9 @@ class VoiceService : Service() {
                         TOOL_REMEMBER -> {
                             known = true
                             answer = Memory.remember(this, params?.optString("text") ?: "")
-                            note("μνήμη", "%d σημειώσεις · τελευταία: %s".format(
-                                Memory.notes(this).size,
-                                (params?.optString("text") ?: "").take(60)))
+                            // Μόνο το μέγεθος, ποτέ το κείμενο: τα διαγνωστικά δεν
+                            // κρατάνε περιεχόμενο συνομιλίας — το λέει η πολιτική απορρήτου.
+                            note("μνήμη", "%s · νέα σημείωση".format(Memory.size(this)))
                         }
                         else -> {
                             known = false

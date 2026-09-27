@@ -23,7 +23,7 @@
 <body>
 
 <h1>ΑΙΑΣ — Πολιτική απορρήτου</h1>
-<p class="sub">Εφαρμογή <code>gr.aias.carviz</code> · Τελευταία ενημέρωση: 13 Σεπτεμβρίου 2026</p>
+<p class="sub">Εφαρμογή <code>gr.aias.carviz</code> · Τελευταία ενημέρωση: 27 Σεπτεμβρίου 2026</p>
 
 <p>Η εφαρμογή ΑΙΑΣ δείχνει μια οπτικοποίηση φωνής στην οθόνη του Android Auto και
 επιτρέπει συνομιλία με φωνητικό βοηθό. Αυτή η σελίδα λέει ακριβώς τι δεδομένα
@@ -32,35 +32,67 @@
 <h2>Μικρόφωνο</h2>
 <ul>
   <li>Το μικρόφωνο ανοίγει <strong>μόνο</strong> όταν πατήσεις «Μίλα» και κλείνει
-      όταν πατήσεις «Σταμάτα». Δεν ακούει ποτέ στο παρασκήνιο.</li>
+      όταν πατήσεις «Σταμάτα». Δεν ακούει ποτέ εκτός συνομιλίας.</li>
   <li>Όσο είναι ανοιχτό, ο ήχος στέλνεται σε πραγματικό χρόνο στην υπηρεσία
       <strong>ElevenLabs Conversational AI</strong>, που τον μετατρέπει σε κείμενο και
       παράγει την απάντηση. Χωρίς αυτή την αποστολή η συνομιλία δεν λειτουργεί.</li>
-  <li>Ο ήχος <strong>δεν αποθηκεύεται στη συσκευή</strong> και δεν στέλνεται πουθενά αλλού.</li>
-  <li>Όσο μιλάει ο βοηθός, η εφαρμογή σταματά να στέλνει ήχο, ώστε να μην
-      καταγράφεται η ίδια του η φωνή από τα ηχεία.</li>
+  <li>Το μικρόφωνο μένει ανοιχτό και όσο μιλάει ο βοηθός, ώστε να μπορείς να τον
+      διακόψεις με τη φωνή σου.</li>
 </ul>
 
-<h2>Τι κάνει η ElevenLabs με τον ήχο</h2>
+<h2>Ηχογράφηση στη συσκευή</h2>
+<ul>
+  <li>Κάθε συνομιλία ηχογραφείται σε αρχείο <strong>μέσα στη συσκευή</strong>, στον
+      χώρο της εφαρμογής: η φωνή σου και η φωνή του βοηθού, σε χωριστά κανάλια.</li>
+  <li>Το αρχείο <strong>δεν φεύγει ποτέ από τη συσκευή μόνο του</strong>. Φεύγει μόνο αν
+      πατήσεις «Στείλε την τελευταία ηχογράφηση» και διαλέξεις εσύ πού θα πάει.</li>
+</ul>
+
+<h2>Τοποθεσία</h2>
+<ul>
+  <li>Αν δώσεις την άδεια, ο βοηθός μπορεί να ρωτήσει <strong>πού βρίσκεστε και με τι
+      ταχύτητα</strong>, και μόνο όταν το χρειάζεται για την κουβέντα. Η εφαρμογή
+      δεν του την στέλνει μόνη της.</li>
+  <li>Στέλνεται <strong>όνομα δρόμου και περιοχής, χωρίς αριθμό, και ταχύτητα</strong> —
+      όχι συντεταγμένες.</li>
+  <li>Αυτή η απάντηση πηγαίνει στην ElevenLabs μέσα στη συνομιλία και
+      <strong>μένει στο κείμενο της συνομιλίας</strong> που κρατάει εκείνη.</li>
+  <li>Η τοποθεσία διαβάζεται μόνο όσο κρατάει η συνομιλία. Δεν χρησιμοποιείται
+      ποτέ στο παρασκήνιο.</li>
+  <li>Η άδεια είναι προαιρετική. Αν την αρνηθείς, η εφαρμογή λειτουργεί κανονικά
+      και ο βοηθός απλώς δεν ξέρει πού είστε.</li>
+</ul>
+
+<h2>Σημειώσεις μνήμης</h2>
+<ul>
+  <li>Ο βοηθός μπορεί να κρατήσει σύντομες σημειώσεις από τις κουβέντες σας, για να
+      τις θυμάται την επόμενη φορά.</li>
+  <li>Οι σημειώσεις <strong>αποθηκεύονται στη συσκευή</strong>, στον ιδιωτικό χώρο της
+      εφαρμογής, και <strong>στέλνονται στην ElevenLabs στην αρχή κάθε συνομιλίας</strong>.</li>
+  <li>Τις βλέπεις και τις σβήνεις από το κουμπί «Τι θυμάται ο ΑΙΑΣ».</li>
+</ul>
+
+<h2>Τι κάνει η ElevenLabs με αυτά</h2>
 <p>Η επεξεργασία γίνεται από την ElevenLabs ως τρίτο μέρος, υπό τους δικούς της όρους
-και πολιτική απορρήτου: <a href="https://elevenlabs.io/privacy">elevenlabs.io/privacy</a>.
-Ανάλογα με τις ρυθμίσεις του συγκεκριμένου πράκτορα, οι συνομιλίες μπορεί να
-καταγράφονται και να διατηρούνται για ανάλυση και βελτίωση.</p>
+και πολιτική απορρήτου: <a href="https://elevenlabs.io/privacy">elevenlabs.io/privacy</a>.</p>
+<p>Για τον συγκεκριμένο βοηθό, <strong>τα κείμενα των συνομιλιών δεν διαγράφονται και
+κρατιούνται χωρίς χρονικό όριο</strong>. Σε αυτά περιλαμβάνονται όσα λέτε, οι απαντήσεις
+για την τοποθεσία και οι σημειώσεις μνήμης που στάλθηκαν στην αρχή κάθε συνομιλίας.</p>
 
 <h2>Τι δεν κάνει η εφαρμογή</h2>
 <ul>
   <li>Δεν ζητάει λογαριασμό και δεν έχει σύνδεση χρήστη.</li>
-  <li>Δεν χρησιμοποιεί τοποθεσία, επαφές, φωτογραφίες, ημερολόγιο ή μηνύματα.</li>
+  <li>Δεν χρησιμοποιεί επαφές, φωτογραφίες, ημερολόγιο ή μηνύματα.</li>
   <li>Δεν έχει διαφημίσεις, ούτε εργαλεία ανάλυσης ή παρακολούθησης.</li>
-  <li>Δεν πουλάει και δεν μοιράζεται δεδομένα με κανέναν άλλον.</li>
+  <li>Δεν πουλάει και δεν μοιράζεται δεδομένα με κανέναν πέρα από την ElevenLabs.</li>
 </ul>
 
 <h2>Διαγνωστικά</h2>
-<p>Η εφαρμογή κρατάει τεχνικά στοιχεία της τελευταίας σύνδεσης με το αυτοκίνητο —
-μέγεθος οθόνης, καρέ ανά δευτερόλεπτο, κατάσταση δικτύου, στάθμη ήχου. Μένουν
-<strong>αποκλειστικά στη συσκευή</strong>, στον ιδιωτικό χώρο της εφαρμογής, δεν
-φεύγουν ποτέ, και σβήνονται με την απεγκατάσταση. Δεν περιέχουν ήχο ούτε κείμενο
-της συνομιλίας.</p>
+<p>Η εφαρμογή κρατάει τεχνικά στοιχεία — μέγεθος οθόνης, καρέ ανά δευτερόλεπτο,
+κατάσταση δικτύου, στάθμη ήχου, και ένα ημερολόγιο ανοίγματος και κλεισίματος των
+συνδέσεων με τον αριθμό κάθε συνομιλίας. Μένουν <strong>αποκλειστικά στη
+συσκευή</strong>, δεν φεύγουν ποτέ, και σβήνονται με την απεγκατάσταση. Δεν
+περιέχουν ήχο ούτε κείμενο της συνομιλίας.</p>
 
 <h2>Παιδιά</h2>
 <p>Η εφαρμογή δεν απευθύνεται σε παιδιά κάτω των δεκατριών ετών και δεν συλλέγει
@@ -68,8 +100,9 @@
 
 <h2>Διαγραφή δεδομένων</h2>
 <p>Στη συσκευή: απεγκατάσταση της εφαρμογής, ή Ρυθμίσεις → Εφαρμογές → ΑΙΑΣ →
-Αποθηκευτικός χώρος → Διαγραφή δεδομένων. Για ό,τι κρατάει η ElevenLabs, το αίτημα
-γίνεται στην ίδια, μέσω της παραπάνω πολιτικής της.</p>
+Αποθηκευτικός χώρος → Διαγραφή δεδομένων. Αυτό σβήνει ηχογραφήσεις, σημειώσεις
+μνήμης και διαγνωστικά. Για ό,τι κρατάει η ElevenLabs, το αίτημα γίνεται στην ίδια,
+μέσω της παραπάνω πολιτικής της.</p>
 
 <h2>Επικοινωνία</h2>
 <p>Για οτιδήποτε σχετικό με αυτή την πολιτική: <a href="mailto:domazakis@gmail.com">domazakis@gmail.com</a></p>
@@ -78,7 +111,7 @@
 
 <div class="en">
 <h1>AIAS — Privacy Policy</h1>
-<p class="sub">App <code>gr.aias.carviz</code> · Last updated: 13 September 2026</p>
+<p class="sub">App <code>gr.aias.carviz</code> · Last updated: 27 September 2026</p>
 
 <p>AIAS displays a voice visualisation on the Android Auto screen and lets you talk to a
 voice assistant. This page states exactly what data it touches, when, and where it goes.</p>
@@ -86,39 +119,70 @@ voice assistant. This page states exactly what data it touches, when, and where 
 <h2>Microphone</h2>
 <ul>
   <li>The microphone opens <strong>only</strong> when you press “Μίλα” (Talk) and closes when
-      you press “Σταμάτα” (Stop). It never listens in the background.</li>
+      you press “Σταμάτα” (Stop). It never listens outside a conversation.</li>
   <li>While open, audio is streamed in real time to <strong>ElevenLabs Conversational AI</strong>,
       which transcribes it and generates the reply. The conversation cannot work without this.</li>
-  <li>Audio is <strong>not stored on the device</strong> and is not sent anywhere else.</li>
-  <li>While the assistant is speaking, the app stops sending audio so that its own voice from
-      the speakers is not captured.</li>
+  <li>The microphone stays open while the assistant speaks, so that you can interrupt it by voice.</li>
 </ul>
 
-<h2>What ElevenLabs does with the audio</h2>
+<h2>Recording on the device</h2>
+<ul>
+  <li>Each conversation is recorded to a file <strong>on the device</strong>, in the app’s
+      storage: your voice and the assistant’s voice on separate channels.</li>
+  <li>The file <strong>never leaves the device on its own</strong>. It leaves only if you press
+      “Στείλε την τελευταία ηχογράφηση” (Send the last recording) and choose where it goes.</li>
+</ul>
+
+<h2>Location</h2>
+<ul>
+  <li>If you grant permission, the assistant may ask <strong>where you are and how fast you are
+      going</strong>, and only when it needs this for the conversation. The app never sends it
+      on its own.</li>
+  <li>What is sent is a <strong>street and area name, without a house number, and a speed</strong> —
+      not coordinates.</li>
+  <li>This answer goes to ElevenLabs as part of the conversation and <strong>remains in the
+      conversation transcript</strong> that ElevenLabs keeps.</li>
+  <li>Location is read only while a conversation is running, never in the background.</li>
+  <li>The permission is optional. If you decline, the app works normally and the assistant simply
+      does not know where you are.</li>
+</ul>
+
+<h2>Memory notes</h2>
+<ul>
+  <li>The assistant may keep short notes from your conversations to remember them next time.</li>
+  <li>The notes are <strong>stored on the device</strong>, in the app’s private storage, and are
+      <strong>sent to ElevenLabs at the start of every conversation</strong>.</li>
+  <li>You can view and delete them with the “Τι θυμάται ο ΑΙΑΣ” (What AIAS remembers) button.</li>
+</ul>
+
+<h2>What ElevenLabs does with this</h2>
 <p>Processing is performed by ElevenLabs as a third party, under its own terms and privacy
-policy: <a href="https://elevenlabs.io/privacy">elevenlabs.io/privacy</a>. Depending on the
-settings of that particular agent, conversations may be recorded and retained for analysis
-and improvement.</p>
+policy: <a href="https://elevenlabs.io/privacy">elevenlabs.io/privacy</a>.</p>
+<p>For this particular assistant, <strong>conversation transcripts are not deleted and are kept
+without a time limit</strong>. They include what is said, the location answers, and the memory notes
+sent at the start of each conversation.</p>
 
 <h2>What the app does not do</h2>
 <ul>
   <li>No account, no sign-in.</li>
-  <li>No location, contacts, photos, calendar or messages.</li>
+  <li>No contacts, photos, calendar or messages.</li>
   <li>No advertising, analytics or tracking.</li>
-  <li>No selling or sharing of data with anyone else.</li>
+  <li>No selling or sharing of data with anyone other than ElevenLabs.</li>
 </ul>
 
 <h2>Diagnostics</h2>
-<p>The app keeps technical details of the last car connection — screen size, frames per second,
-network state, audio level. These stay <strong>on the device only</strong>, in the app’s private
-storage, never leave it, and are removed on uninstall. They contain no audio and no conversation text.</p>
+<p>The app keeps technical details — screen size, frames per second, network state, audio level,
+and a log of connections opening and closing with each conversation’s identifier. These stay
+<strong>on the device only</strong>, never leave it, and are removed on uninstall. They contain no
+audio and no conversation text.</p>
 
 <h2>Children</h2>
 <p>The app is not directed at children under thirteen and does not knowingly collect their data.</p>
 
 <h2>Data deletion</h2>
-<p>On the device: uninstall the app, or Settings → Apps → AIAS → Storage → Clear data. For anything
-retained by ElevenLabs, requests go to them through the policy linked above.</p>
+<p>On the device: uninstall the app, or Settings → Apps → AIAS → Storage → Clear data. This removes
+recordings, memory notes and diagnostics. For anything retained by ElevenLabs, requests go to them
+through the policy linked above.</p>
 
 <h2>Contact</h2>
 <p><a href="mailto:domazakis@gmail.com">domazakis@gmail.com</a></p>

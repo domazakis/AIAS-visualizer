@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
      * με «δεν με ακούει».
      */
     private fun toggleVoice() {
+        if (Voice.tooSoon()) return
         if (Voice.active) {
             stopService(Intent(this, VoiceService::class.java))
             Voice.reset()
@@ -106,7 +107,7 @@ class MainActivity : AppCompatActivity() {
     private fun showMemory() {
         val n = Memory.notes(this)
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Τι θυμάται ο ΑΙΑΣ (${n.size})")
+            .setTitle("Τι θυμάται ο ΑΙΑΣ · ${Memory.size(this)}")
             .setMessage(if (n.isEmpty()) "Καμία σημείωση ακόμη." else n.joinToString("\n\n"))
             .setPositiveButton("Εντάξει", null)
             .setNegativeButton("Σβήσ' τα") { _, _ ->

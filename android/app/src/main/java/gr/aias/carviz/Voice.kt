@@ -26,6 +26,24 @@ object Voice {
     /** 'idle' | 'listen' | 'speak' */
     @Volatile var mode = "idle"
 
+    /**
+     * Δύο πατήματα του κουμπιού της φωνής σε ενάμισι δευτερόλεπτο μετράνε
+     * ως ένα — από κινητό ή από αυτοκίνητο, το ίδιο ρολόι.
+     *
+     * Ένα διπλό άγγιγμα στην οθόνη του αυτοκινήτου γινόταν «σταμάτα» και
+     * αμέσως «ξεκίνα»: η παλιά συνεδρία έκλεινε με κλείσιμο που μπορεί να μην
+     * προλάβαινε να φτάσει, και η καινούργια άνοιγε από πάνω. Δύο χρεώσεις για
+     * ένα πάτημα.
+     */
+    @Volatile private var lastToggle = 0L
+
+    fun tooSoon(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastToggle < 1500) return true
+        lastToggle = now
+        return false
+    }
+
     /** Ανθρώπινη περιγραφή, για την οθόνη διαγνωστικών στο κινητό. */
     @Volatile var status = "ανενεργή"
 
