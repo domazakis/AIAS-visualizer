@@ -110,6 +110,20 @@ class VoiceService : Service() {
     }
 
     @Volatile private var ws: WebSocket? = null
+
+    /**
+     * Η γραμμή όπου επιτρέπεται να πάει ήχος: μόνο αφού ο server επιβεβαιώσει
+     * τη συνομιλία.
+     *
+     * ΤΟ ΣΦΑΛΜΑ ΤΗΣ 28/09. Το `ws` γράφεται τη στιγμή που ζητάμε σύνδεση, πριν
+     * ανοίξει. Το μικρόφωνο έστελνε κιόλας εκεί, και η OkHttp κρατάει στην
+     * ουρά ό,τι στέλνεις σε γραμμή που ανοίγει: μετά τη χειραψία έφευγαν
+     * πρώτα τα κομμάτια ήχου, και ΜΕΤΑ οι μεταβλητές. Ο νέος agent θέλει το
+     * `greeting` στο πρώτο μήνυμα, άρα κάθε εκκίνηση απορριπτόταν με «Missing
+     * required dynamic variables in first message». Ο παλιός agent δεν είχε
+     * υποχρεωτικές μεταβλητές, γι' αυτό δεν φάνηκε ποτέ.
+     */
+    @Volatile private var audioTo: WebSocket? = null
     /** Ο ακροατής της τρέχουσας γραμμής — για να περιμένουμε το κλείσιμό της. */
     private var listener: Conn? = null
     private val connLock = Any()
@@ -141,6 +155,8 @@ class VoiceService : Service() {
     @Volatile private var readFails = 0
     @Volatile private var sent = 0
     @Volatile private var sendFails = 0
+    /** Κομμάτια ήχου πριν δεχτεί ο server τη συνομιλία· πετιούνται, δες [audioTo]. */
+    @Volatile private var held = 0
     /** Πόσα μηνύματα διακοπής έστειλε ο server — δες τον χειριστή «interruption». */
     @Volatile private var interruptions = 0
     /** Πόσες φορές ρώτησε ο agent πού είμαστε. */
@@ -153,9 +169,6 @@ class VoiceService : Service() {
     @Volatile private var refusals = 0
     /** Ήρθε η επιβεβαίωση της συνομιλίας σε αυτή την προσπάθεια; */
     @Volatile private var started = false
-    @Volatile private var openedAt = 0L
-    /** Ο server απέρριψε τις μεταβλητές μνήμης· συνεχίζουμε χωρίς αυτές. */
-    @Volatile private var noVars = false
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     @Volatile private var running = false
@@ -441,7 +454,6 @@ class VoiceService : Service() {
             }
             log("άνοιγμα · ανοιχτές γραμμές $n")
             Log.i(TAG, "συνδέθηκε")
-            live = webSocket
 
             Voice.status = "συνδεδεμένος"
             Voice.mode = "listen"
@@ -456,12 +468,23 @@ class VoiceService : Service() {
                 Memory.size(this@VoiceService),
                 if (reconnect) "επανασύνδεση, με τα πρόσφατα" else "νέα διαδρομή"))
             started = false
-            openedAt = System.nanoTime()
-            val init = JSONObject().put("type", "conversation_initiation_client_data")
-            if (!noVars) init.put("dynamic_variables", JSONObject()
-                .put("memory", Memory.payload(this@VoiceService, reconnect))
-                .put("greeting", Memory.greeting(reconnect)))
-            webSocket.send(init.toString())
+            // ΟΙ ΜΕΤΑΒΛΗΤΕΣ ΦΕΥΓΟΥΝ ΠΑΝΤΑ, ΚΑΙ ΠΡΩΤΕΣ. Ο agent τις απαιτεί στο
+            // ΠΡΩΤΟ μήνυμα της γραμμής· οι προεπιλογές της κονσόλας ισχύουν μόνο
+            // στη δοκιμή της κονσόλας. Χωρίς αυτές δεν ξεκινά καμία συνεδρία.
+            // Γι' αυτό και το μικρόφωνο δεν στέλνει τίποτα πριν απαντήσει ο
+            // server — δες [audioTo].
+            val memory = Memory.payload(this@VoiceService, reconnect)
+            val greeting = Memory.greeting(reconnect)
+            webSocket.send(JSONObject()
+                .put("type", "conversation_initiation_client_data")
+                .put("dynamic_variables", JSONObject()
+                    .put("memory", memory)
+                    .put("greeting", greeting))
+                .toString())
+            // Μόνο το μήκος της μνήμης, ποτέ το κείμενο: το ημερολόγιο είναι
+            // διαγνωστικό, και τα διαγνωστικά δεν κρατάνε περιεχόμενο.
+            log("πρώτο μήνυμα: memory ${memory.length} χαρ. · greeting «$greeting»")
+            live = webSocket
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -488,7 +511,6 @@ class VoiceService : Service() {
             if (!started && (limit(why) || response?.code == 429)) { limitStop(why); return }
             // Ο server απάντησε και αρνήθηκε — δεν είναι το δίκτυο.
             if (response != null && refused("HTTP ${response.code} $why")) return
-            rejectedVars()
             val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
             Voice.status = msg
             Voice.mode = "idle"
@@ -511,38 +533,10 @@ class VoiceService : Service() {
             // 4300: έληξε η αναμονή στην ουρά, αν ανοίξει ποτέ η ουρά στην κονσόλα.
             if (code == 4300 || (!started && limit(reason))) { limitStop("$code $reason"); return }
             if (!started && refused("$code $reason")) return
-            rejectedVars()
             Voice.status = "αποσυνδέθηκε"
             Voice.mode = "idle"
             retryLater()
         }
-    }
-
-    /**
-     * Ξαναδοκιμάζει σε τρία δευτερόλεπτα, όσο τρέχει η υπηρεσία.
-     *
-     * Χωρίς αυτό, μία αποτυχία στην αρχή —μπαίνοντας στο αυτοκίνητο πριν
-     * πιάσει το hotspot, ας πούμε— σήμαινε βουβό βοηθό για όλη τη διαδρομή,
-     * με το κουμπί να λέει «Σταμάτα» σαν να δούλευε.
-     */
-    /**
-     * ΔΙΧΤΥ ΑΣΦΑΛΕΙΑΣ ΓΙΑ ΤΙΣ ΜΕΤΑΒΛΗΤΕΣ ΜΝΗΜΗΣ.
-     *
-     * Η τεκμηρίωση του ElevenLabs δεν λέει τι γίνεται αν στείλεις μεταβλητή που
-     * το prompt δεν χρησιμοποιεί. Αν την απορρίπτει, κάθε συνομιλία θα έκλεινε
-     * αμέσως — ο ΑΙΑΣ βουβός μέχρι να αλλάξει κάποιος την κονσόλα. Δεν μπορούσε
-     * να δοκιμαστεί όταν γράφτηκε: τα credits είχαν τελειώσει.
-     *
-     * Άρα: αν η γραμμή κλείσει μέσα σε τρία δευτερόλεπτα από το άνοιγμα και
-     * ΠΡΙΝ επιβεβαιώσει ο server τη συνομιλία, ξαναδοκιμάζουμε χωρίς μεταβλητές
-     * και το γράφουμε. Χάνεται η μνήμη, όχι η κουβέντα.
-     */
-    private fun rejectedVars(): Boolean {
-        if (noVars || started || openedAt == 0L) return false
-        if (System.nanoTime() - openedAt > 3_000_000_000L) return false
-        noVars = true
-        note("μνήμη", "ο server απέρριψε τις μεταβλητές — συνεχίζουμε χωρίς μνήμη")
-        return true
     }
 
     /** Ο server έκλεισε επειδή τελείωσαν τα credits; */
@@ -591,20 +585,32 @@ class VoiceService : Service() {
 
     /**
      * Ο server έκλεισε **πριν** επιβεβαιώσει τη συνομιλία, με λόγο που δεν
-     * αναγνωρίζουμε. Μία φορά μπορεί να είναι οι μεταβλητές ([rejectedVars]),
-     * δύο μπορεί να είναι σύμπτωση. Την τρίτη σταματάμε: ένα όριο που δεν
-     * ξέρουμε να διαβάσουμε δεν πρέπει να γίνει κύκλος που καίει το ημερήσιο.
+     * αναγνωρίζουμε. Μία φορά μπορεί να είναι σύμπτωση· τη δεύτερη σταματάμε.
+     * Μια άρνηση δεν διορθώνεται ξαναρωτώντας, και κάθε προσπάθεια γράφεται
+     * στο ημερήσιο όριο των τριάντα.
+     *
+     * Ήταν τρεις, μαζί με ένα δίχτυ που ξαναδοκίμαζε χωρίς μεταβλητές. Στις
+     * 28/09 έτσι κάθε «Μίλα» κόστιζε τρεις απορριφθείσες εκκινήσεις, και το
+     * δίχτυ δεν μπορούσε ποτέ να πετύχει: ο agent δεν ξεκινά χωρίς το
+     * `greeting`.
      */
     private fun refused(why: String): Boolean {
-        if (++refusals < 3) return false
+        if (++refusals < 2) return false
         noMoreRetries = true
         Voice.status = "άρνηση server"
         Voice.mode = "idle"
-        note("φωνή", "ο server αρνήθηκε τρεις φορές: ${why.take(90)} — δεν ξαναδοκιμάζουμε")
-        log("ΕΓΚΑΤΑΛΕΙΨΗ: τρεις αρνήσεις · ${why.take(90)}")
+        note("φωνή", "ο server αρνήθηκε δύο φορές: ${why.take(90)} — δεν ξαναδοκιμάζουμε")
+        log("ΕΓΚΑΤΑΛΕΙΨΗ: δύο αρνήσεις · ${why.take(90)}")
         return true
     }
 
+    /**
+     * Ξαναδοκιμάζει, όσο τρέχει η υπηρεσία.
+     *
+     * Χωρίς αυτό, μία αποτυχία στην αρχή —μπαίνοντας στο αυτοκίνητο πριν
+     * πιάσει το hotspot, ας πούμε— σήμαινε βουβό βοηθό για όλη τη διαδρομή,
+     * με το κουμπί να λέει «Σταμάτα» σαν να δούλευε.
+     */
     private fun retryLater() {
         // Η αποτυχία φτάνει και από το `onFailure` και από το `onClosed`· χωρίς
         // τον μανδαλωτή θα ξεκινούσαν δύο προσπάθειες για το ίδιο πράγμα.
@@ -665,6 +671,7 @@ class VoiceService : Service() {
                 "conversation_initiation_metadata" -> {
                     started = true
                     refusals = 0
+                    audioTo = webSocket
                     sessionStart = System.currentTimeMillis()
                     val cid = o.optJSONObject("conversation_initiation_metadata_event")
                         ?.optString("conversation_id") ?: "—"
@@ -883,8 +890,10 @@ class VoiceService : Service() {
 
                 val b64 = Base64.encodeToString(bytes, 0, n * 2, Base64.NO_WRAP)
                 try {
-                    val w = ws
-                    if (w == null) sendFails++
+                    // Μόνο σε γραμμή που ο server έχει ήδη δεχτεί. Πριν από αυτό
+                    // ο ήχος πετιέται — ένα κλάσμα του δευτερολέπτου σιωπής.
+                    val w = audioTo
+                    if (w == null || w !== ws) held++
                     else if (w.send(JSONObject().put("user_audio_chunk", b64).toString())) sent++
                     else sendFails++
                 } catch (e: Throwable) { sendFails++ }
@@ -1502,9 +1511,9 @@ class VoiceService : Service() {
                     // αυτοκινήτου, η ηχώ θα επιστρέψει και το ξέρουμε πριν
                     // ακούσουμε την ηχογράφηση.
                     note("μικρόφωνο",
-                        ("διαβ %d/απέτ %d · εστ %d/απέτ %d · κορ %.4f " +
+                        ("διαβ %d/απέτ %d · εστ %d/απέτ %d/πριν %d · κορ %.4f " +
                          "(ενώ μιλά %.4f) · από %s · διακοπές %d").format(
-                            reads, readFails, sent, sendFails,
+                            reads, readFails, sent, sendFails, held,
                             Voice.micHi, Voice.micHiSpeak, micSource(), interruptions))
                     note("ένταση", "κλήση %s · %s".format(callVolume(), volFix))
                     note("θέση", "%s · ρωτήθηκε %d".format(Where.line(), toolCalls))
