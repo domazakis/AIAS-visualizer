@@ -23,12 +23,13 @@ import java.util.Locale
  *      Εδώ γράφει μόνο η εφαρμογή — και πάντα **προσθέτοντας**, ποτέ
  *      αντικαθιστώντας: αν το αρχείο άλλαξε από τότε που το διαβάσαμε,
  *      ξαναδιαβάζεται και ξαναπροσπαθούμε.
- *    - `memory.txt`: μόνο ό,τι ενέκρινε ο Claude. Η εφαρμογή **μόνο το
- *      διαβάζει**.
+ *    - `memory.txt`: μόνο ό,τι ενέκρινε ο Claude.
  *
- *    Ο Claude ξαναγράφει και τα δύο όποτε θέλει· η εφαρμογή τα ξαναδιαβάζει
- *    σε κάθε έναρξη συνεδρίας. Έτσι η μνήμη είναι ίδια σε όποιο κινητό κι αν
- *    κουμπώσει ο Γιάννης.
+ *    Ο Claude στο chat **δεν μπορεί να αντικαταστήσει αρχεία** στο Dropbox,
+ *    μόνο να φτιάξει καινούργια. Άρα δεν αγγίζει ποτέ αυτά τα δύο: αφήνει
+ *    πρόταση `memory.new.<ΕΕΕΕΜΜΗΗ-ΩΩΛΛ>.txt`, και την εφαρμόζει η εφαρμογή
+ *    ([applyProposal]). Η εφαρμογή τα ξαναδιαβάζει σε κάθε έναρξη συνεδρίας.
+ *    Έτσι η μνήμη είναι ίδια σε όποιο κινητό κι αν κουμπώσει ο Γιάννης.
  *
  *    Στο κινητό μένουν αντίγραφα και των δύο, για να δουλεύει ο ΑΙΑΣ και χωρίς
  *    δίκτυο, και ένα `pending.txt` με σημειώσεις που δεν έχουν ανέβει ακόμη.
@@ -79,6 +80,8 @@ object Memory {
     private const val CACHE_MEMORY = "cloud-memory.txt"
     private const val CACHE_INBOX = "cloud-inbox.txt"
     private const val PENDING = "pending.txt"
+    /** Το τελευταίο φιλτράρισμα του Claude που εφαρμόστηκε, για την οθόνη μνήμης. */
+    private const val FILTERED = "filtered.txt"
     /** Ως την 0.46 οι σημειώσεις ζούσαν εδώ· μεταφέρονται στο `pending`. */
     private const val LEGACY = "memory.txt"
 
@@ -124,9 +127,17 @@ object Memory {
     }
 
     /**
-     * Πρώτα το `memory.txt` (για να μην ξανανέβει κάτι που ο Claude ήδη
-     * ενέκρινε), μετά οι νέες σημειώσεις στο `inbox.txt`. Ένας συγχρονισμός τη
-     * φορά. Αργό — μόνο από νήμα παρασκηνίου.
+     * Ένας συγχρονισμός τη φορά, με αυτή τη σειρά:
+     *
+     * 1. Αν ο Claude άφησε πρόταση φιλτραρίσματος, εφαρμόζεται ([applyProposal]).
+     * 2. `memory.txt` → αντίγραφο στο κινητό.
+     * 3. Οι νέες σημειώσεις του κινητού → `inbox.txt`, με προσθήκη.
+     *
+     * **Αρχείο που λείπει από το Dropbox δεν σημαίνει άδεια μνήμη.** Κρατάμε το
+     * αντίγραφο του κινητού και το ξανανεβάζουμε· μια διαγραφή δεν
+     * συγχρονίζεται ποτέ προς τα κινητά.
+     *
+     * Αργό — μόνο από νήμα παρασκηνίου.
      */
     fun sync(ctx: Context) = synchronized(syncLock) {
         migrate(ctx)
@@ -135,45 +146,147 @@ object Memory {
                            else "δεν έχει ρυθμιστεί — μόνο στο κινητό"
             return@synchronized
         }
-        when (val g = Cloud.get(ctx, REMOTE_MEMORY)) {
-            is Cloud.Got.Ok -> write(ctx, CACHE_MEMORY, lines(g.text))
-            is Cloud.Got.Missing -> write(ctx, CACHE_MEMORY, emptyList())
-            is Cloud.Got.Fail -> { Cloud.status = "σφάλμα: ${g.why} — από το κινητό"; return@synchronized }
+
+        val names = Cloud.list(ctx) ?: return@synchronized
+        val proposals = names.filter { PROPOSAL.matches(it) }.sorted()
+        if (proposals.isNotEmpty() && !applyProposal(ctx, proposals)) return@synchronized
+
+        val cachedMemory = read(ctx, CACHE_MEMORY)
+        val m = rewrite(ctx, REMOTE_MEMORY) { remote ->
+            if (remote == null && cachedMemory.isNotEmpty()) cachedMemory else null
         }
+        if (!m.ok) return@synchronized
+        m.lines?.let { write(ctx, CACHE_MEMORY, it) }
         val approved = read(ctx, CACHE_MEMORY).map { body(it).lowercase() }.toSet()
 
-        // Προσθήκη με έλεγχο έκδοσης. Αν άλλαξε στο μεταξύ —άλλο κινητό, ο
-        // Claude— ξαναδιαβάζεται. Τρεις φορές και τα παρατάμε ως την επόμενη.
-        repeat(3) {
-            val remote: List<String>
-            val rev: String?
-            when (val g = Cloud.get(ctx, REMOTE_INBOX)) {
-                is Cloud.Got.Ok -> { remote = lines(g.text); rev = g.rev }
-                is Cloud.Got.Missing -> { remote = emptyList(); rev = null }
-                is Cloud.Got.Fail -> { Cloud.status = "σφάλμα: ${g.why} — από το κινητό"; return@synchronized }
-            }
-            val pend = read(ctx, PENDING)
-            val there = remote.map { body(it).lowercase() }.toSet()
+        val pend = read(ctx, PENDING)
+        val cachedInbox = read(ctx, CACHE_INBOX)
+        var added = 0
+        val i = rewrite(ctx, REMOTE_INBOX) { remote ->
+            val base = remote ?: cachedInbox
+            val there = base.map { body(it).lowercase() }.toSet()
             val add = pend.filter { body(it).lowercase() !in there && body(it).lowercase() !in approved }
-            if (add.isEmpty()) {
-                write(ctx, CACHE_INBOX, remote)
-                drop(ctx, pend)
-                Cloud.status = "συγχρονίστηκε ${clock()}"
-                return@synchronized
+            added = add.size
+            if (remote != null && add.isEmpty()) null else (base + add).ifEmpty { null }
+        }
+        if (!i.ok) return@synchronized
+        i.lines?.let { write(ctx, CACHE_INBOX, it) }
+        drop(ctx, pend)
+        Cloud.status = "συγχρονίστηκε ${clock()}" + if (added > 0) " · ανέβηκαν $added" else ""
+    }
+
+    /** `memory.new.20260929-2215.txt` — το όνομα ταξινομείται όπως ο χρόνος. */
+    private val PROPOSAL = Regex("^memory\\.new\\..+\\.txt$", RegexOption.IGNORE_CASE)
+
+    internal class Proposal(val memory: List<String>, val processed: List<String>)
+
+    /**
+     * Η πρόταση του Claude: `## memory` με ολόκληρο το νέο `memory.txt`, και
+     * `## processed` με αυτολεξεί τις γραμμές του inbox που επεξεργάστηκε.
+     * Χωρίς ενότητα `## memory` δεν είναι πρόταση — δεν εφαρμόζεται, για να
+     * μη σβηστεί η μνήμη από ένα μισογραμμένο αρχείο. Άδεια ενότητα όμως είναι
+     * έγκυρη: ο Claude απέρριψε τα πάντα.
+     */
+    internal fun parseProposal(text: String): Proposal? {
+        var section: String? = null
+        var hasMemory = false
+        val memory = ArrayList<String>()
+        val processed = ArrayList<String>()
+        for (raw in text.lines()) {
+            val l = raw.trim()
+            if (l.startsWith("##")) {
+                section = l.removePrefix("##").trim().lowercase()
+                if (section == "memory") hasMemory = true
+                continue
             }
-            val merged = remote + add
-            when (val p = Cloud.put(ctx, REMOTE_INBOX, merged.joinToString("\n") + "\n", rev)) {
-                is Cloud.Put.Ok -> {
-                    write(ctx, CACHE_INBOX, merged)
-                    drop(ctx, pend)
-                    Cloud.status = "συγχρονίστηκε ${clock()} · ανέβηκαν ${add.size}"
-                    return@synchronized
-                }
-                is Cloud.Put.Conflict -> Log.i(TAG, "το inbox άλλαξε στο μεταξύ — ξανά")
-                is Cloud.Put.Fail -> { Cloud.status = "σφάλμα: ${p.why} — από το κινητό"; return@synchronized }
+            if (l.isEmpty()) continue
+            when (section) {
+                "memory" -> memory += l
+                "processed" -> processed += l
             }
         }
-        Cloud.status = "το inbox άλλαζε συνέχεια — ξανά στην επόμενη σύνδεση"
+        return if (hasMemory) Proposal(memory, processed) else null
+    }
+
+    /**
+     * Ο Claude στο chat δεν μπορεί να αντικαταστήσει αρχεία στο Dropbox, μόνο
+     * να φτιάξει καινούργια. Γι' αυτό αφήνει πρόταση, και την εφαρμόζει η
+     * εφαρμογή:
+     *
+     * - `memory.txt` ← η ενότητα `memory`, ολόκληρη.
+     * - `inbox.txt` ← ό,τι είχε, **μείον μόνο** τις γραμμές της `processed`.
+     *   Ό,τι σημειώθηκε ενώ ο Claude φιλτράριζε μένει.
+     * - Σβήνονται όλες οι προτάσεις. Αν ήταν πολλές, ισχύει η νεότερη: ο Claude
+     *   τη βάσισε σε ό,τι έβλεπε τότε, που περιλάμβανε ό,τι δεν είχαν
+     *   προλάβει να εφαρμόσουν οι παλαιότερες.
+     *
+     * Αν κοπεί στη μέση, ξαναγίνεται στον επόμενο συγχρονισμό με το ίδιο
+     * αποτέλεσμα· γι' αυτό η πρόταση σβήνεται τελευταία. Το ίδιο κι αν δύο
+     * κινητά την εφαρμόσουν μαζί.
+     */
+    private fun applyProposal(ctx: Context, proposals: List<String>): Boolean {
+        val newest = proposals.last()
+        val text = when (val g = Cloud.get(ctx, "/$newest")) {
+            is Cloud.Got.Ok -> g.text
+            is Cloud.Got.Missing -> return true   // την εφάρμοσε ήδη άλλο κινητό
+            is Cloud.Got.Fail -> { Cloud.status = "σφάλμα: ${g.why} — από το κινητό"; return false }
+        }
+        val p = parseProposal(text)
+        if (p == null) {
+            write(ctx, FILTERED, listOf("${clock()} · $newest ΔΕΝ εφαρμόστηκε: λείπει η ενότητα ## memory"))
+            return true
+        }
+        if (!rewrite(ctx, REMOTE_MEMORY) { p.memory }.ok) return false
+        write(ctx, CACHE_MEMORY, p.memory)
+
+        val processed = p.processed.toSet()
+        val cachedInbox = read(ctx, CACHE_INBOX)
+        var removed = 0
+        val i = rewrite(ctx, REMOTE_INBOX) { remote ->
+            val base = remote ?: cachedInbox
+            val next = base.filter { it !in processed }
+            removed = base.size - next.size
+            if (remote == null && next.isEmpty()) null else next
+        }
+        if (!i.ok) return false
+        write(ctx, CACHE_INBOX, i.lines ?: cachedInbox.filter { it !in processed })
+
+        for (n in proposals) Cloud.delete(ctx, "/$n")
+        write(ctx, FILTERED, listOf(
+            "${clock()} · $newest · εγκεκριμένες ${p.memory.size} · βγήκαν $removed από το inbox" +
+                if (proposals.size > 1) " · αγνοήθηκαν ${proposals.size - 1} παλαιότερες προτάσεις" else ""))
+        return true
+    }
+
+    private class Outcome(val ok: Boolean, val lines: List<String>?)
+
+    /**
+     * Διάβασε, άλλαξε, γράψε — με έλεγχο έκδοσης. Αν στο μεταξύ το άλλαξε κάποιος
+     * άλλος (άλλο κινητό), ξαναδιαβάζεται και η αλλαγή γίνεται πάνω στο νέο.
+     *
+     * Το [change] παίρνει το περιεχόμενο (`null` αν λείπει) και δίνει το νέο, ή
+     * `null` για «καμία εγγραφή». Το [Outcome.lines] είναι ό,τι ισχύει τελικά
+     * στο Dropbox· `null` αν το αρχείο λείπει και δεν γράφτηκε.
+     */
+    private fun rewrite(ctx: Context, path: String, change: (List<String>?) -> List<String>?): Outcome {
+        repeat(3) {
+            val remote: List<String>?
+            val rev: String?
+            when (val g = Cloud.get(ctx, path)) {
+                is Cloud.Got.Ok -> { remote = lines(g.text); rev = g.rev }
+                is Cloud.Got.Missing -> { remote = null; rev = null }
+                is Cloud.Got.Fail -> { Cloud.status = "σφάλμα: ${g.why} — από το κινητό"; return Outcome(false, null) }
+            }
+            val next = change(remote)
+            if (next == null || next == remote) return Outcome(true, remote)
+            when (val p = Cloud.put(ctx, path, next.joinToString("\n") + "\n", rev)) {
+                is Cloud.Put.Ok -> return Outcome(true, next)
+                is Cloud.Put.Conflict -> Log.i(TAG, "το $path άλλαξε στο μεταξύ — ξανά")
+                is Cloud.Put.Fail -> { Cloud.status = "σφάλμα: ${p.why} — από το κινητό"; return Outcome(false, null) }
+            }
+        }
+        Cloud.status = "το $path άλλαζε συνέχεια — ξανά στην επόμενη σύνδεση"
+        return Outcome(false, null)
     }
 
     /** Βγάζει από το `pending` ό,τι ανέβηκε — όχι ό,τι σημειώθηκε στο μεταξύ. */
@@ -186,7 +299,7 @@ object Memory {
     /** Τοπικά μόνο: χωρίς Dropbox, αυτό είναι όλη η μνήμη. */
     @Synchronized
     fun forget(ctx: Context) {
-        for (f in listOf(PENDING, CACHE_INBOX, CACHE_MEMORY, LEGACY))
+        for (f in listOf(PENDING, CACHE_INBOX, CACHE_MEMORY, FILTERED, LEGACY))
             try { File(ctx.filesDir, f).delete() } catch (e: Throwable) { }
     }
 
@@ -212,7 +325,9 @@ object Memory {
         val cloudInbox = read(ctx, CACHE_INBOX)
         val pend = read(ctx, PENDING)
         val c = compose(a, cloudInbox + pend, "", BUDGET)
+        val filtered = read(ctx, FILTERED).lastOrNull()
         return buildString {
+            if (filtered != null) append("✓ Εφαρμόστηκε φιλτράρισμα: ").append(filtered).append("\n\n")
             if (c.dropped > 0) {
                 append("⚠ ΠΑΝΩ ΑΠΟ ΤΟ ΟΡΙΟ: ").append(chars(a + cloudInbox + pend))
                     .append(" χαρακτήρες, το όριο είναι ").append(BUDGET).append(". ")

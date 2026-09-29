@@ -200,10 +200,26 @@ class VoiceService : Service() {
     /** Η κορυφή των τελευταίων δευτερολέπτων, για τον αυτόματο έλεγχο κέρδους. */
     private var peak = 0.0
 
+    /**
+     * ΤΟ ΧΡΟΝΟΜΕΤΡΟ ΠΟΥ ΣΚΟΤΩΝΕΙ ΓΡΑΜΜΕΣ. Η OkHttp στέλνει ping ανά
+     * `pingInterval` και, αν δεν έρθει pong ως το επόμενο, ρίχνει τη γραμμή
+     * **τοπικά** — χωρίς κλείσιμο προς τον server, που τη θεωρεί ζωντανή ως
+     * να λήξει μόνος του. Στις 29/09 ένα κόλλημα του δικτύου έφερε νέα
+     * συνεδρία 12″ μετά την τελευταία ατάκα, ενώ η παλιά χρεωνόταν ακόμη 57″.
+     *
+     * Ήταν 20 δευτ. Τώρα 30: μια TCP γραμμή επιβιώνει κόλλημα δεκάδων
+     * δευτερολέπτων (τούνελ, αλλαγή κεραίας), και αν τη δούμε να συνεχίζει δεν
+     * χρειάζεται ούτε επανασύνδεση ούτε δεύτερη χρέωση. Το κόστος είναι ότι
+     * μια γραμμή που πέθανε στ' αλήθεια φαίνεται 10″ αργότερα — όταν όμως δεν
+     * υπάρχει δίκτυο, δεν ξανασυνδεόμαστε έτσι κι αλλιώς.
+     */
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)   // ο ήχος έρχεται συνεχώς
-        .pingInterval(20, TimeUnit.SECONDS)
+        .pingInterval(30, TimeUnit.SECONDS)
         .build()
+
+    /** Πότε ήρθε το τελευταίο μήνυμα από τον server — για το «γιατί» κάθε επανασύνδεσης. */
+    @Volatile private var lastRx = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -494,7 +510,9 @@ class VoiceService : Service() {
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            if (current(webSocket)) handle(webSocket, text)
+            if (!current(webSocket)) return
+            lastRx = System.currentTimeMillis()
+            handle(webSocket, text)
         }
 
         /**
@@ -517,6 +535,15 @@ class VoiceService : Service() {
             if (!started && (limit(why) || response?.code == 429)) { limitStop(why); return }
             // Ο server απάντησε και αρνήθηκε — δεν είναι το δίκτυο.
             if (response != null && refused("HTTP ${response.code} $why")) return
+            // ΓΙΑΤΙ ΞΑΝΑΣΥΝΔΕΟΜΑΣΤΕ. Δικό μας χρονόμετρο ή το δίκτυο; Χωρίς
+            // αυτή τη γραμμή, μια διπλή χρέωση δεν εξηγείται εκ των υστέρων.
+            val cause = when {
+                why.contains("pong", true) -> "δικό μας χρονόμετρο: ping χωρίς pong σε 30″"
+                response != null -> "ο server απάντησε HTTP ${response.code}"
+                !online() -> "το κινητό έμεινε χωρίς δίκτυο"
+                else -> "σφάλμα γραμμής/δικτύου (${t.javaClass.simpleName})"
+            }
+            log("ΕΠΑΝΑΣΥΝΔΕΣΗ · αιτία: $cause · σιωπή server ${silence()} · $why")
             val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
             Voice.status = msg
             Voice.mode = "idle"
@@ -539,6 +566,7 @@ class VoiceService : Service() {
             // 4300: έληξε η αναμονή στην ουρά, αν ανοίξει ποτέ η ουρά στην κονσόλα.
             if (code == 4300 || (!started && limit(reason))) { limitStop("$code $reason"); return }
             if (!started && refused("$code $reason")) return
+            log("ΕΠΑΝΑΣΥΝΔΕΣΗ · αιτία: ο server έκλεισε $code ${reason.take(60)} · σιωπή server ${silence()}")
             Voice.status = "αποσυνδέθηκε"
             Voice.mode = "idle"
             retryLater()
@@ -642,8 +670,18 @@ class VoiceService : Service() {
                 ws = null; listener = null
             }
             if (old != null) {
-                try { old.close(1000, "επανασύνδεση") } catch (e: Throwable) { }
-                try { oldL?.done?.await(3, TimeUnit.SECONDS) } catch (e: InterruptedException) { }
+                // Πάντα close 1000, ακόμη κι αν η γραμμή μοιάζει νεκρή: αν ζει
+                // έστω λίγο, ο server την κλείνει αμέσως και δεν χρεώνει. Αν
+                // είχε ήδη πέσει τοπικά, η OkHttp δεν έχει πού να το στείλει —
+                // και το γράφουμε, γιατί τότε η επικάλυψη είναι αναπόφευκτη.
+                val sent = try { old.close(1000, "επανασύνδεση") } catch (e: Throwable) { false }
+                val t0 = System.currentTimeMillis()
+                val ack = try { oldL?.done?.await(3, TimeUnit.SECONDS) ?: true } catch (e: InterruptedException) { false }
+                log("παλιά γραμμή: " + when {
+                    !sent -> "είχε ήδη πέσει, το close 1000 δεν είχε πού να πάει"
+                    ack -> "close 1000 · έκλεισε σε ${System.currentTimeMillis() - t0} ms"
+                    else -> "close 1000 · καμία επιβεβαίωση σε 3″"
+                })
                 try { old.cancel() } catch (e: Throwable) { }
             }
             try { Thread.sleep(wait) } catch (e: InterruptedException) { }
@@ -662,6 +700,10 @@ class VoiceService : Service() {
      * και αποτυχία, μαζί με το πόσες γραμμές είναι ανοιχτές εκείνη τη στιγμή.
      * Αν ο αριθμός περάσει ποτέ το ένα, φαίνεται εδώ πριν φανεί στον λογαριασμό.
      */
+    /** Πόσο καιρό δεν έχει στείλει τίποτα ο server — «4.2″», ή «—» αν ποτέ. */
+    private fun silence(): String =
+        if (lastRx == 0L) "—" else "%.1f″".format((System.currentTimeMillis() - lastRx) / 1000.0)
+
     private fun log(event: String) {
         Log.i(TAG, "συνεδρία: $event")
         try {

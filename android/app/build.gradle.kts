@@ -44,8 +44,8 @@ android {
         applicationId = "gr.aias.carviz"
         minSdk = 24
         targetSdk = 36
-        versionCode = 47
-        versionName = "0.47"
+        versionCode = 48
+        versionName = "0.48"
         buildConfigField("String", "AGENT_ID", "\"$agentId\"")
         buildConfigField("String", "DROPBOX_KEY", "\"$dropboxKey\"")
     }

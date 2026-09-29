@@ -159,6 +159,47 @@ object Cloud {
         }
     }
 
+    /** Τα ονόματα των αρχείων στη ρίζα του φακέλου της εφαρμογής. `null` σε σφάλμα. */
+    fun list(ctx: Context): List<String>? {
+        val out = ArrayList<String>()
+        var o = rpc(ctx, "files/list_folder", JSONObject().put("path", "")) ?: return null
+        while (true) {
+            val e = o.optJSONArray("entries")
+            if (e != null) for (i in 0 until e.length()) {
+                val x = e.getJSONObject(i)
+                if (x.optString(".tag") == "file") out += x.optString("name")
+            }
+            if (!o.optBoolean("has_more")) return out
+            o = rpc(ctx, "files/list_folder/continue",
+                JSONObject().put("cursor", o.optString("cursor"))) ?: return null
+        }
+    }
+
+    /** Σβήνει ένα αρχείο. Αν δεν υπάρχει ήδη, είναι κι αυτό επιτυχία. */
+    fun delete(ctx: Context, path: String): Boolean =
+        rpc(ctx, "files/delete_v2", JSONObject().put("path", path), notFoundOk = true) != null
+
+    private fun rpc(ctx: Context, endpoint: String, arg: JSONObject, notFoundOk: Boolean = false): JSONObject? {
+        val t = access(ctx) ?: return null
+        return try {
+            http.newCall(Request.Builder()
+                .url("https://api.dropboxapi.com/2/$endpoint")
+                .header("Authorization", "Bearer $t")
+                .post(arg.toString().toRequestBody("application/json".toMediaType()))
+                .build()).execute().use { r ->
+                val body = r.body?.string().orEmpty()
+                when {
+                    r.isSuccessful -> JSONObject(body)
+                    notFoundOk && r.code == 409 && body.contains("not_found") -> JSONObject()
+                    else -> { status = "σφάλμα $endpoint: HTTP ${r.code}"; null }
+                }
+            }
+        } catch (e: Throwable) {
+            status = "σφάλμα $endpoint: ${e.javaClass.simpleName}"
+            null
+        }
+    }
+
     // ------------------------------------------------------------ κλειδιά
 
     /** Ένα έγκυρο κλειδί πρόσβασης, ανανεωμένο αν χρειάζεται. */

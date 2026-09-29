@@ -59,6 +59,32 @@ class MemoryTest {
         assertEquals("Ο Γιάννης: δεύτερη γενιά.", Memory.body("Ο Γιάννης: δεύτερη γενιά."))
     }
 
+    @Test fun proposalSections() {
+        val p = Memory.parseProposal("""
+            ## memory
+            29/09: Του αρέσει ο καφές σκέτος.
+
+            ## processed
+            29/09: Του αρέσει ο καφές σκέτος.
+            29/09: Μέτρα ως το δέκα.
+        """.trimIndent())!!
+        assertEquals(listOf("29/09: Του αρέσει ο καφές σκέτος."), p.memory)
+        assertEquals(2, p.processed.size)
+    }
+
+    @Test fun proposalWithEmptyMemoryIsValid() {
+        // Ο Claude απέρριψε τα πάντα: άδεια μνήμη, όχι άκυρη πρόταση.
+        val p = Memory.parseProposal("## memory\n\n## processed\n29/09: Μέτρα ως το δέκα.\n")!!
+        assertTrue(p.memory.isEmpty())
+        assertEquals(1, p.processed.size)
+    }
+
+    @Test fun proposalWithoutMemorySectionIsRejected() {
+        // Μισογραμμένο αρχείο δεν πρέπει να σβήσει τη μνήμη.
+        assertEquals(null, Memory.parseProposal("## processed\n29/09: κάτι\n"))
+        assertEquals(null, Memory.parseProposal(""))
+    }
+
     @Test fun linesToleratesWindowsAndBlankLines() {
         assertEquals(listOf("α", "β"), Memory.lines("α\r\n\r\n  β  \r\n"))
     }
