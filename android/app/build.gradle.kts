@@ -18,6 +18,13 @@ val local = Properties().apply {
 val agentId: String = local.getProperty("aias.agentId", "")
 
 /**
+ * Το app key της εφαρμογής ΑΙΑΣ στο Dropbox (App Console → Settings). Δεν είναι
+ * μυστικό —η σύνδεση γίνεται με PKCE, χωρίς app secret— αλλά μένει κι αυτό
+ * εκτός repo. Κενό σημαίνει ότι η μνήμη μένει μόνο στο κινητό.
+ */
+val dropboxKey: String = local.getProperty("aias.dropboxKey", "")
+
+/**
  * Το κλειδί ανεβάσματος. Ζει μόνο στο `local.properties` και στο
  * `upload-keystore.jks`, και τα δύο στο .gitignore.
  *
@@ -37,9 +44,10 @@ android {
         applicationId = "gr.aias.carviz"
         minSdk = 24
         targetSdk = 36
-        versionCode = 46
-        versionName = "0.46"
+        versionCode = 47
+        versionName = "0.47"
         buildConfigField("String", "AGENT_ID", "\"$agentId\"")
+        buildConfigField("String", "DROPBOX_KEY", "\"$dropboxKey\"")
     }
 
     buildFeatures { buildConfig = true }

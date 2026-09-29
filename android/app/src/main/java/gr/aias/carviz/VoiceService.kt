@@ -218,7 +218,12 @@ class VoiceService : Service() {
         watchDevices()
         val rec = Rec.start(this)
         note("εγγραφή", rec?.substringAfterLast('/') ?: "δεν ξεκίνησε")
-        connect()
+        // Πρώτα η μνήμη από το Dropbox — ως τέσσερα δευτερόλεπτα, και μετά
+        // με ό,τι έχει το κινητό. Δες [Memory].
+        Thread({
+            Memory.syncWithin(this, 4_000L)
+            if (running) connect()
+        }, "aias-start").start()
         startCapture()
         startPlayback()
         startLevelTicker()
@@ -464,9 +469,10 @@ class VoiceService : Service() {
             // τις τελευταίες ατάκες και άλλον χαιρετισμό.
             val reconnect = talkedThisDrive && Memory.hasRecent()
             talkedThisDrive = true
-            note("μνήμη", "%s · %s".format(
+            note("μνήμη", "%s · %s · Dropbox: %s".format(
                 Memory.size(this@VoiceService),
-                if (reconnect) "επανασύνδεση, με τα πρόσφατα" else "νέα διαδρομή"))
+                if (reconnect) "επανασύνδεση, με τα πρόσφατα" else "νέα διαδρομή",
+                Cloud.status))
             started = false
             // ΟΙ ΜΕΤΑΒΛΗΤΕΣ ΦΕΥΓΟΥΝ ΠΑΝΤΑ, ΚΑΙ ΠΡΩΤΕΣ. Ο agent τις απαιτεί στο
             // ΠΡΩΤΟ μήνυμα της γραμμής· οι προεπιλογές της κονσόλας ισχύουν μόνο
@@ -641,6 +647,8 @@ class VoiceService : Service() {
                 try { old.cancel() } catch (e: Throwable) { }
             }
             try { Thread.sleep(wait) } catch (e: InterruptedException) { }
+            // Κάθε συνεδρία ξαναδιαβάζει τη μνήμη: ο Claude μπορεί να την άλλαξε.
+            if (running && !noMoreRetries) Memory.syncWithin(this, 3_000L)
             retrying.set(false)
             if (!running || noMoreRetries) return@Thread
             connect()
@@ -739,6 +747,7 @@ class VoiceService : Service() {
                             // Μόνο το μέγεθος, ποτέ το κείμενο: τα διαγνωστικά δεν
                             // κρατάνε περιεχόμενο συνομιλίας — το λέει η πολιτική απορρήτου.
                             note("μνήμη", "%s · νέα σημείωση".format(Memory.size(this)))
+                            Memory.flushAsync(this)
                         }
                         else -> {
                             known = false

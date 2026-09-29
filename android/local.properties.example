@@ -10,3 +10,11 @@ sdk.dir=/διαδρομή/προς/το/Android/Sdk
 # του μυστικού — για δημόσιο agent δεν χρειάζεται καθόλου αυθεντικοποίηση —
 # αλλά ακριβώς γι' αυτό δεν θέλει δημοσίευση.
 aias.agentId=agent_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Το app key της εφαρμογής ΑΙΑΣ στο Dropbox (App Console → Settings → App key).
+#
+# Για τη μνήμη σε Dropbox (0.47): inbox.txt και memory.txt στον φάκελο
+# τον φάκελό της μέσα στο Εφαρμογές. Η εφαρμογή στο Dropbox πρέπει να είναι «App folder», με τα
+# δικαιώματα files.content.read και files.content.write. Δεν είναι μυστικό
+# (PKCE, χωρίς app secret). Κενό: η μνήμη μένει μόνο στο κινητό.
+aias.dropboxKey=

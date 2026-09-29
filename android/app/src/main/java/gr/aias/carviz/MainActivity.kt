@@ -104,13 +104,30 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(send, "${f.name} · $mb MB"))
     }
 
+    /**
+     * Τι θυμάται ο ΑΙΑΣ: εγκεκριμένες, νέες, και αν ξεπεράστηκε το όριο.
+     *
+     * Με Dropbox, τις σημειώσεις τις διαχειρίζεται ο Claude στο chat, άρα
+     * εδώ δεν σβήνεται τίποτα — μόνο συγχρονίζεται. Χωρίς Dropbox, η μνήμη
+     * είναι μόνο στο κινητό και σβήνεται από εδώ, όπως πριν.
+     */
     private fun showMemory() {
-        val n = Memory.notes(this)
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        val linked = Cloud.linked(this)
+        val b = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Τι θυμάται ο ΑΙΑΣ · ${Memory.size(this)}")
-            .setMessage(if (n.isEmpty()) "Καμία σημείωση ακόμη." else n.joinToString("\n\n"))
+            .setMessage(Memory.view(this))
             .setPositiveButton("Εντάξει", null)
-            .setNegativeButton("Σβήσ' τα") { _, _ ->
+        if (linked) {
+            b.setNeutralButton("Συγχρονισμός") { _, _ ->
+                toast("Συγχρονισμός…")
+                Thread {
+                    Memory.sync(this)
+                    runOnUiThread { showMemory() }
+                }.start()
+            }
+        } else {
+            if (Cloud.configured()) b.setNeutralButton("Σύνδεση Dropbox") { _, _ -> linkDropbox() }
+            b.setNegativeButton("Σβήσ' τα") { _, _ ->
                 // Μη αναστρέψιμο: δεύτερη ερώτηση.
                 androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("Να ξεχάσει όλες τις σημειώσεις;")
@@ -121,7 +138,56 @@ class MainActivity : AppCompatActivity() {
                     .setNegativeButton("Άκυρο", null)
                     .show()
             }
-            .show()
+        }
+        b.show()
+    }
+
+    /**
+     * Μία φορά ανά κινητό. Ο browser ανοίγει το Dropbox, ο Γιάννης πατά
+     * «Allow», αντιγράφει τον κωδικό και τον επικολλά εδώ. Δες [Cloud].
+     *
+     * Το κουμπί «Άνοιξε το Dropbox» δεν κλείνει τον διάλογο: ο Γιάννης φεύγει
+     * στον browser και γυρίζει στο ίδιο παράθυρο, με το πεδίο να περιμένει.
+     */
+    private fun linkDropbox() {
+        val field = android.widget.EditText(this).apply {
+            hint = "Επικόλλησε εδώ τον κωδικό"
+            isSingleLine = true
+        }
+        val box = android.widget.FrameLayout(this).apply {
+            setPadding(56, 16, 56, 0)
+            addView(field)
+        }
+        val d = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Σύνδεση με το Dropbox")
+            .setMessage("1. «Άνοιξε το Dropbox» και πάτα Allow.\n" +
+                "2. Αντίγραψε τον κωδικό που θα δείξει.\n" +
+                "3. Γύρνα εδώ, επικόλλησέ τον και πάτα «Σύνδεση».\n\n" +
+                "Η εφαρμογή βλέπει μόνο τον δικό της φάκελο, μέσα στο «Εφαρμογές».")
+            .setView(box)
+            .setNeutralButton("Άνοιξε το Dropbox", null)
+            .setPositiveButton("Σύνδεση", null)
+            .setNegativeButton("Άκυρο", null)
+            .create()
+        d.setOnShowListener {
+            d.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Cloud.authUrl(this))))
+            }
+            d.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val code = field.text.toString().trim()
+                if (code.isEmpty()) { toast("Πρώτα επικόλλησε τον κωδικό."); return@setOnClickListener }
+                toast("Σύνδεση…")
+                Thread {
+                    val err = Cloud.finish(this, code)
+                    if (err == null) Memory.sync(this)
+                    runOnUiThread {
+                        if (err != null) toast(err)
+                        else { d.dismiss(); toast("Συνδέθηκε. Dropbox: ${Cloud.status}"); showMemory() }
+                    }
+                }.start()
+            }
+        }
+        d.show()
     }
 
     private fun toast(s: String) =
