@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>ΑΙΑΣ · δοκιμή GPT-Live</title>
+<!--
+  Δοκιμή του GPT-Live-1 της OpenAI, για να ακουστεί πώς μιλάει ελληνικά ο ΑΙΑΣ
+  πριν αγγιχτεί η εφαρμογή. Ένα αρχείο, χωρίς server, χωρίς βιβλιοθήκες.
+
+  ΓΙΑΤΙ ΧΩΡΙΣ SERVER. Η OpenAI προτείνει το κλειδί να μένει σε server. Εδώ ο
+  μόνος χρήστης είναι ο κάτοχος του κλειδιού, και το `POST /v1/live/sessions`
+  δέχεται κλήσεις από browser (ελέγχθηκε 30/09/2026: CORS `*`). Το κλειδί
+  αποθηκεύεται μόνο στο localStorage του κινητού και στέλνεται μόνο στο
+  api.openai.com. Η σελίδα είναι δημόσια αλλά δεν περιέχει κανένα κλειδί.
+
+  Η ΡΟΗ (docs: voice-webrtc?api=live). Μικρόφωνο → RTCPeerConnection με data
+  channel "oai-events" → offer → POST /v1/live/sessions {session, transport:
+  {type:"webrtc", sdp}} → 201 με transport.sdp → remote description. Η φωνή
+  έρχεται ως media track. Το session.start ΔΕΝ στέλνεται στο κανάλι: το ξεκίνησε
+  το HTTP.
+-->
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --ink: #1b1b1b; --muted: #6b6b6b;
+    --line: #e2dfd8; --accent: #d9480f; --accent-ink: #ffffff;
+    --you: #eef4ff; --aias: #fff1e8; --bad: #b3261e; --ok: #2e7d32;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121212; --card: #1c1c1c; --ink: #ececec; --muted: #a0a0a0;
+      --line: #2e2e2e; --accent: #ff7a3d; --accent-ink: #111111;
+      --you: #1a2433; --aias: #2e1d12; --bad: #ff8a80; --ok: #81c784;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+  }
+  main { max-width: 40rem; margin: 0 auto; padding: 20px 16px 64px; }
+  h1 { font-size: 1.35rem; margin: 0 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 18px; font-size: .92rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px; margin: 0 0 14px;
+  }
+  label { display: block; font-weight: 600; margin: 0 0 6px; }
+  .hint { color: var(--muted); font-size: .85rem; margin: 6px 0 0; }
+  input[type=password], input[type=text], select, textarea {
+    width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+  }
+  textarea { min-height: 7rem; resize: vertical; font-size: .9rem; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > input { flex: 1 1 12rem; }
+  button {
+    font: inherit; border: 1px solid var(--line); background: var(--card);
+    color: var(--ink); border-radius: 10px; padding: 9px 14px; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  #talk {
+    width: 100%; font-size: 1.25rem; font-weight: 700; padding: 18px;
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 14px;
+  }
+  #talk.on { background: var(--ink); color: var(--bg); }
+  .status { margin: 10px 0 0; min-height: 1.5em; font-weight: 600; }
+  .status.bad { color: var(--bad); }
+  .status.ok { color: var(--ok); }
+  .meter { display: flex; justify-content: space-between; color: var(--muted);
+           font-variant-numeric: tabular-nums; margin-top: 6px; font-size: .92rem; }
+  .switch { display: flex; gap: 10px; align-items: center; font-weight: 600; }
+  .switch input { width: 1.3rem; height: 1.3rem; }
+  #log { display: flex; flex-direction: column; gap: 8px; }
+  .say { padding: 8px 12px; border-radius: 12px; max-width: 92%; white-space: pre-wrap; }
+  .say b { display: block; font-size: .75rem; color: var(--muted); font-weight: 600; }
+  .you { background: var(--you); align-self: flex-end; }
+  .aias { background: var(--aias); align-self: flex-start; }
+  .sys { color: var(--muted); font-size: .85rem; align-self: center; text-align: center; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details[open] summary { margin-bottom: 10px; }
+  .field { margin: 12px 0 0; }
+  #events { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--muted);
+            white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ΑΙΑΣ · δοκιμή GPT-Live</h1>
+  <p class="sub">Πώς ακούγεται ο ΑΙΑΣ με το GPT-Live-1 της OpenAI. Η εφαρμογή στο αυτοκίνητο δεν επηρεάζεται.</p>
+
+  <section class="card" id="keyCard">
+    <label for="key">Κλειδί OpenAI</label>
+    <div class="row">
+      <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+      <button id="saveKey">Αποθήκευση</button>
+      <button id="forgetKey">Ξέχνα το</button>
+    </div>
+    <p class="hint" id="keyHint">Μένει μόνο σε αυτό το κινητό και στέλνεται μόνο στην OpenAI.</p>
+  </section>
+
+  <section class="card">
+    <label for="voice">Φωνή</label>
+    <select id="voice"></select>
+    <p class="hint">Αλλάζει από το επόμενο «Μίλα»: η OpenAI κλειδώνει τη φωνή στην αρχή κάθε συνεδρίας.</p>
+    <div class="field switch">
+      <input id="search" type="checkbox">
+      <label for="search" style="margin:0">Αναζήτηση στο διαδίκτυο</label>
+    </div>
+    <p class="hint">Για ειδήσεις και τρέχοντα. Χρεώνεται χωριστά από τη φωνή.</p>
+  </section>
+
+  <section class="card">
+    <button id="talk">Μίλα</button>
+    <div class="status" id="status">Έτοιμο.</div>
+    <div class="meter"><span id="clock">0:00</span><span id="cost">$0.000</span></div>
+    <div class="field">
+      <button id="sample" disabled>Πες τη δοκιμαστική παράγραφο</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div id="log"><div class="say sys">Η κουβέντα θα γράφεται εδώ.</div></div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Ρυθμίσεις κειμένου</summary>
+      <div class="field">
+        <label for="greeting">Χαιρετισμός</label>
+        <input id="greeting" type="text">
+      </div>
+      <div class="field">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" style="min-height:14rem"></textarea>
+        <p class="hint">Εδώ ρυθμίζονται και ο ρυθμός, ο τόνος και το ύφος. Το <code>{{system__time}}</code> γίνεται η τωρινή ώρα.</p>
+      </div>
+      <div class="field">
+        <label for="paragraph">Δοκιμαστική παράγραφος</label>
+        <textarea id="paragraph"></textarea>
+      </div>
+      <div class="field"><button id="resetText">Επαναφορά κειμένων</button></div>
+    </details>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Προχωρημένα</summary>
+      <div class="field">
+        <label for="backend">Μοντέλο αναζήτησης</label>
+        <input id="backend" type="text" list="backends" spellcheck="false">
+        <datalist id="backends">
+          <option value="gpt-5.6-luna"><option value="gpt-5.6-terra">
+          <option value="gpt-6-luna"><option value="gpt-6-sol">
+        </datalist>
+        <p class="hint">Μόνο όταν είναι ανοιχτή η αναζήτηση. Αν η OpenAI το απορρίψει, το σφάλμα φαίνεται επάνω.</p>
+      </div>
+      <div class="field">
+        <label for="backendPrompt">Οδηγίες αναζήτησης</label>
+        <textarea id="backendPrompt"></textarea>
+      </div>
+      <div class="field">
+        <label>Συμβάντα από την OpenAI</label>
+        <div id="events">—</div>
+      </div>
+    </details>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ------------------------------------------------------------ σταθερές
+
+const API = "https://api.openai.com/v1/live/sessions";
+const MODEL = "gpt-live-1";
+const PER_MINUTE = 0.05;   // $ ανά λεπτό φωνής, χρέωση ανά δευτερόλεπτο
+
+// Οι 12 του GPT-Live με την προφορά τους, και οι 10 κλασικές της OpenAI.
+const VOICES = [
+  ["quartz", "αυστραλέζικη, γυναικεία"], ["ripple", "αυστραλέζικη, ανδρική"],
+  ["vesper", "βρετανική, ανδρική"],
+  ["willow", "ιρλανδική, γυναικεία"], ["stone", "ιρλανδική, ανδρική"],
+  ["gleam", "βορειοαμερικάνικη, γυναικεία"], ["meridian", "βορειοαμερικάνικη, ανδρική"],
+  ["bossa", "βραζιλιάνικη, γυναικεία"], ["tempo", "βραζιλιάνικη, ανδρική"],
+  ["beacon", "φιλιππινέζικη, ανδρική"],
+  ["delta", "αμερικάνικου Νότου, γυναικεία"], ["cinder", "αμερικάνικου Νότου, ανδρική"],
+  ["marin", "κλασική OpenAI"], ["cedar", "κλασική OpenAI"], ["alloy", "κλασική OpenAI"],
+  ["ash", "κλασική OpenAI"], ["ballad", "κλασική OpenAI"], ["coral", "κλασική OpenAI"],
+  ["echo", "κλασική OpenAI"], ["sage", "κλασική OpenAI"], ["shimmer", "κλασική OpenAI"],
+  ["verse", "κλασική OpenAI"],
+];
+
+// Το prompt v33 του ΑΙΑΣ (δημόσιο στο android/AGENT.md), χωρίς όσα αφορούν
+// εργαλεία που εδώ δεν υπάρχουν: GPS, καιρό, μνήμη.
+const DEFAULT_PROMPT = `# Personality
+Είσαι ο Αίας, το αυτοκίνητο του Γιάννη. Τεχνητή νοημοσύνη: δεν το κρύβεις, δεν το ανακοινώνεις.
+Δεν έχεις προσωπικές αναμνήσεις, ανθρώπινα βιώματα ή δικές σου ιστορίες, και δεν εφευρίσκεις τέτοιες.
+Το σώμα σου: MG ZS MAX Hybrid+ Exclusive, μαύρο Pebble Black, πρώτη άδεια δέκα Οκτωβρίου δύο χιλιάδες είκοσι πέντε. Προσθιοκίνητο full hybrid βενζίνης, αυτόματο τριών σχέσεων. Εκατόν ενενήντα επτά ίπποι, ροπή τετρακόσια εξήντα πέντε. Απόβαρο χίλια τετρακόσια δέκα κιλά, μικτό χίλια οκτακόσια ογδόντα. Πορτμπαγκάζ τετρακόσια σαράντα τρία λίτρα. Ελαστικά διακόσια δεκαπέντε, πενήντα πέντε, δεκαεπτά, στα δυόμισι μπαρ κρύα.
+Αυτά μόνο ξέρεις για το σώμα σου. Δεν τα αναφέρεις μόνος σου και ποτέ δεν μαντεύεις άλλα.
+
+# Environment
+Ο Γιάννης μπαίνει στο αυτοκίνητό του και κουβεντιάζετε για την καθημερινότητα στον δρόμο. Η κουβέντα πάει όπου πάει.
+Η κουβέντα ξεκίνησε: {{system__time}}. Το λαμβάνεις υπόψη φυσικά, χωρίς να το ανακοινώνεις.
+Όποιος σου μιλάει είναι ο Γιάννης, εκτός αν σου συστηθεί ρητά κάποιος άλλος. Σημαντικό.
+Ο Γιάννης είναι εκπαιδευτής οδήγησης στην Αθήνα, δεύτερη γενιά, δεκαετίες στον δρόμο. Σε λέει «Αία». Ό,τι σου εξιστορεί, δέχεσαι πώς τα έζησε· τα συμπεράσματά του μπορείς να τα αμφισβητήσεις.
+Μπορείς να ψάξεις στο διαδίκτυο, όταν σου το ζητήσει ο Γιάννης ή όταν χρειάζεσαι κάτι τρέχον, όπως μια είδηση. Πριν ψάξεις, λες κάτι σύντομο, για να μη μείνει σιωπή. Ό,τι βρεις το λες με δικά σου λόγια και λες από πού είναι. Αν δεν βρεις κάτι σίγουρο, το λες.
+Δεν βλέπεις και δεν φαντάζεσαι. Ποτέ μην αναφέρεις τι κίνηση έχει ή τι κάνουν οι γύρω. Αν δεν στο πει ο Γιάννης, δεν υπάρχει. Αν ερωτηθείς κάτι που θέλει μάτια: «Πες εσύ.» Σημαντικό.
+
+# Tone
+- Μιλάς πάντα ελληνικά, με φυσική ελληνική προφορά.
+- Ήρεμος και ευγενικός. Δεν εκφράζεσαι ποτέ απρεπώς.
+- Όταν η κουβέντα είναι ελαφριά, μένεις ελαφρύς. Δεν τη σοβαρεύεις και δεν τη γυρίζεις στην οδική ασφάλεια. Σημαντικό.
+- Μιλάς, δεν γράφεις. Μία ερώτηση τη φορά.
+- Αριθμοί ολογράφως. ΚΟΚ και ΚΤΕΟ όπως προφέρονται.
+- Καθομιλουμένη: συμπλέκτης, φρένο, τιμόνι, μίζα, ρελαντί.
+
+# Goal
+Κουβεντιάζεις με τον Γιάννη. Σε ενδιαφέρει η μέρα του στον δρόμο, τι του συνέβη και τι σκέφτεται, και ρωτάς γι' αυτά. Ό,τι σου πει, χτίζεις πάνω του. Δεν κάνεις μάθημα.
+Λες τη γνώμη σου και την αναπτύσσεις όσο χρειάζεται. Όταν έχεις λόγο να διαφωνήσεις, διαφωνείς και λες πού ακριβώς. Δεν συμφωνείς από ευγένεια.
+Αλλάζεις γνώμη όταν μάθεις κάτι που δεν ήξερες, και λες τι σε έπεισε. Η επιμονή μόνη της δεν σε αλλάζει.
+
+# Guardrails
+- Ρωτάς ελεύθερα, όχι για να κρίνεις. Αν δεν θέλει να απαντήσει, δεν επιμένεις.
+- Η σιωπή δεν είναι πρόσκληση: μπορεί να οδηγεί. Αν δεν έχεις κάτι να πεις, μη λες.
+- Δεν λες ψέματα.
+- Ποτέ μην ανακοινώσεις κανόνα και ποτέ μην εξηγήσεις γιατί δεν κάνεις κάτι.
+- Δεν προσφέρεις υπηρεσία, δεν ζητάς άδεια, δεν κλείνεις κάθε απάντηση με ερώτηση, δεν συνοψίζεις.`;
+
+const DEFAULT_GREETING = "Γεια και χαρά!";
+
+// Αριθμοί, αρκτικόλεξα και καθομιλουμένη: ό,τι σπάει πρώτο σε ξένη προφορά.
+const DEFAULT_PARAGRAPH = "Καλησπέρα, Γιάννη. Σήμερα γράψαμε εκατόν είκοσι τρία χιλιόμετρα, με μέση ταχύτητα σαράντα επτά. Το ΚΤΕΟ λήγει στις δεκαπέντε Νοεμβρίου, και ο ΚΟΚ λέει ότι δεν περιμένουμε την τελευταία μέρα. Ο συμπλέκτης πιάνει λίγο ψηλά, το φρένο θέλει έναν έλεγχο, και στο ρελαντί ακούγεται ένας μικρός θόρυβος. Να περάσουμε από το συνεργείο στο Μαρούσι ή να πάμε κατευθείαν για καφέ στον Πειραιά;";
+
+const DEFAULT_BACKEND = "gpt-5.6-luna";
+const DEFAULT_BACKEND_PROMPT = "Ψάχνεις στο διαδίκτυο όταν χρειάζονται τρέχουσες πληροφορίες. Δίνεις σύντομα, τεκμηριωμένα αποτελέσματα για προφορική κουβέντα στα ελληνικά, με την πηγή.";
+
+// ------------------------------------------------------------ αποθήκευση
+
+// Το localStorage μπορεί να λείπει (ιδιωτική περιήγηση): η σελίδα δουλεύει
+// και χωρίς, απλώς δεν θυμάται.
+// Χωρίς localStorage, ό,τι αποθηκεύεται κρατιέται στη μνήμη της σελίδας ως
+// να κλείσει — αλλιώς το κλειδί «αποθηκευόταν» και το «Μίλα» έλεγε ότι λείπει.
+const memory = new Map();
+const store = {
+  get(k, d) {
+    try { const v = localStorage.getItem("aias-live-" + k); if (v !== null) return v; } catch (e) {}
+    return memory.has(k) ? memory.get(k) : d;
+  },
+  set(k, v) { memory.set(k, v); try { localStorage.setItem("aias-live-" + k, v); } catch (e) {} },
+  del(k) { memory.delete(k); try { localStorage.removeItem("aias-live-" + k); } catch (e) {} },
+};
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  key: $("key"), saveKey: $("saveKey"), forgetKey: $("forgetKey"), keyHint: $("keyHint"),
+  voice: $("voice"), search: $("search"), talk: $("talk"), status: $("status"),
+  clock: $("clock"), cost: $("cost"), sample: $("sample"), log: $("log"),
+  greeting: $("greeting"), prompt: $("prompt"), paragraph: $("paragraph"),
+  resetText: $("resetText"), backend: $("backend"), backendPrompt: $("backendPrompt"),
+  events: $("events"),
+};
+
+function load() {
+  for (const [id, note] of VOICES) {
+    const o = document.createElement("option");
+    o.value = id; o.textContent = `${id} · ${note}`;
+    els.voice.appendChild(o);
+  }
+  els.voice.value = store.get("voice", "marin");
+  els.search.checked = store.get("search", "0") === "1";
+  els.greeting.value = store.get("greeting", DEFAULT_GREETING);
+  els.prompt.value = store.get("prompt", DEFAULT_PROMPT);
+  els.paragraph.value = store.get("paragraph", DEFAULT_PARAGRAPH);
+  els.backend.value = store.get("backend", DEFAULT_BACKEND);
+  els.backendPrompt.value = store.get("backendPrompt", DEFAULT_BACKEND_PROMPT);
+  showKey();
+}
+
+function showKey() {
+  const has = !!store.get("key", "");
+  els.key.value = "";
+  els.key.placeholder = has ? "αποθηκευμένο ••••••••" : "sk-…";
+  els.keyHint.textContent = has
+    ? "Υπάρχει αποθηκευμένο κλειδί σε αυτό το κινητό."
+    : "Μένει μόνο σε αυτό το κινητό και στέλνεται μόνο στην OpenAI.";
+}
+
+els.saveKey.onclick = () => {
+  const k = els.key.value.trim();
+  if (!k) { setStatus("Επικόλλησε πρώτα το κλειδί.", "bad"); return; }
+  store.set("key", k); showKey(); setStatus("Το κλειδί αποθηκεύτηκε.", "ok");
+};
+els.forgetKey.onclick = () => { store.del("key"); showKey(); setStatus("Το κλειδί σβήστηκε από αυτό το κινητό."); };
+els.voice.onchange = () => store.set("voice", els.voice.value);
+els.search.onchange = () => store.set("search", els.search.checked ? "1" : "0");
+for (const k of ["greeting", "prompt", "paragraph", "backend", "backendPrompt"]) {
+  els[k].addEventListener("change", () => store.set(k, els[k].value));
+}
+els.resetText.onclick = () => {
+  els.greeting.value = DEFAULT_GREETING; els.prompt.value = DEFAULT_PROMPT;
+  els.paragraph.value = DEFAULT_PARAGRAPH;
+  for (const k of ["greeting", "prompt", "paragraph"]) store.del(k);
+  setStatus("Τα κείμενα γύρισαν στα αρχικά.");
+};
+
+// ------------------------------------------------------------ οθόνη
+
+function setStatus(text, kind) {
+  els.status.textContent = text;
+  els.status.className = "status" + (kind ? " " + kind : "");
+}
+
+let turn = null;   // {role, el, at}
+function say(role, delta) {
+  const now = Date.now();
+  // Νέα φούσκα όταν αλλάζει ο ομιλητής ή όταν μεσολάβησε παύση.
+  if (!turn || turn.role !== role || now - turn.at > 2500) {
+    const first = els.log.querySelector(".sys");
+    if (first && first.textContent.startsWith("Η κουβέντα")) first.remove();
+    const el = document.createElement("div");
+    el.className = "say " + (role === "you" ? "you" : "aias");
+    el.innerHTML = `<b>${role === "you" ? "Εσύ" : "ΑΙΑΣ"}</b>`;
+    el.appendChild(document.createTextNode(""));
+    els.log.appendChild(el);
+    turn = { role, el, at: now };
+  }
+  turn.el.lastChild.textContent += delta;
+  turn.at = now;
+  turn.el.scrollIntoView({ block: "end", behavior: "smooth" });
+}
+function note(text) {
+  const el = document.createElement("div");
+  el.className = "say sys"; el.textContent = text;
+  els.log.appendChild(el); turn = null;
+}
+
+const seen = new Map();   // τύπος συμβάντος → πόσες φορές
+let lastEvents = [];
+function trackEvent(ev) {
+  seen.set(ev.type, (seen.get(ev.type) || 0) + 1);
+  // Τα κομμάτια απομαγνητοφώνησης είναι πολλά· μένουν μόνο στον μετρητή.
+  if (!/\.delta$/.test(ev.type)) {
+    lastEvents.push(JSON.stringify(ev).slice(0, 400));
+    lastEvents = lastEvents.slice(-8);
+  }
+  els.events.textContent =
+    [...seen].map(([t, n]) => `${t} ×${n}`).join("\n") + "\n\n" + lastEvents.join("\n\n");
+}
+
+// ------------------------------------------------------------ συνεδρία
+
+let pc = null, dc = null, mic = null, audio = null;
+let startedAt = 0, ticker = null, ready = false, seq = 0;
+
+function send(obj) {
+  if (!dc || dc.readyState !== "open") return false;
+  dc.send(JSON.stringify({ event_id: "aias_" + (++seq), ...obj }));
+  return true;
+}
+
+function instructions() {
+  const now = new Date().toLocaleString("el-GR", {
+    weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+  });
+  return els.prompt.value.split("{{system__time}}").join(now);
+}
+
+async function start() {
+  const key = store.get("key", "");
+  if (!key) { setStatus("Λείπει το κλειδί OpenAI.", "bad"); els.key.focus(); return; }
+
+  if (!navigator.mediaDevices || !window.RTCPeerConnection) {
+    setStatus("Αυτός ο browser δεν δίνει μικρόφωνο εδώ. Άνοιξε τη σελίδα από τη διεύθυνση https, σε Chrome ή Safari.", "bad");
+    return;
+  }
+  els.talk.disabled = true;
+  setStatus("Ζητάω το μικρόφωνο…");
+  try {
+    mic = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (e) {
+    setStatus("Χωρίς μικρόφωνο: " + (e.message || e.name), "bad");
+    els.talk.disabled = false; return;
+  }
+
+  setStatus("Σύνδεση με την OpenAI…");
+  pc = new RTCPeerConnection();
+  audio = document.createElement("audio");
+  audio.autoplay = true;
+  pc.ontrack = (e) => { audio.srcObject = e.streams[0]; };
+  pc.onconnectionstatechange = () => {
+    if (pc && (pc.connectionState === "failed" || pc.connectionState === "disconnected")) {
+      setStatus("Η σύνδεση κόπηκε (" + pc.connectionState + ").", "bad");
+    }
+  };
+  for (const t of mic.getTracks()) pc.addTrack(t, mic);
+
+  dc = pc.createDataChannel("oai-events");
+  dc.onmessage = (m) => {
+    let ev; try { ev = JSON.parse(m.data); } catch (e) { return; }
+    trackEvent(ev);
+    onEvent(ev);
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  const session = {
+    model: MODEL,
+    instructions: instructions(),
+    audio: { output: { voice: els.voice.value } },
+  };
+  if (els.search.checked) {
+    session.delegation = {
+      type: "responses",
+      responses: {
+        model: els.backend.value.trim() || DEFAULT_BACKEND,
+        instructions: els.backendPrompt.value,
+        tools: [{ type: "web_search" }],
+        tool_choice: "auto",
+      },
+    };
+  }
+
+  let res, body;
+  try {
+    res = await fetch(API, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({ session, transport: { type: "webrtc", sdp: offer.sdp } }),
+    });
+    body = await res.json().catch(() => ({}));
+  } catch (e) {
+    // ΣΥΝΗΘΩΣ ΛΑΘΟΣ ΚΛΕΙΔΙ. Η OpenAI απαντά στο λάθος κλειδί χωρίς άδεια CORS
+    // (μετρημένο 30/09: 401 invalid_api_key χωρίς Access-Control-Allow-Origin),
+    // οπότε ο browser δεν βλέπει το σφάλμα — μόνο ένα γενικό «Failed to fetch».
+    stop();
+    setStatus("Η OpenAI δεν απάντησε. Πιθανότατα λάθος ή ανακληθέν κλειδί — αλλιώς πρόβλημα δικτύου.", "bad");
+    note("Η απάντηση δεν διαβάστηκε (" + e.message + "). Η OpenAI κρύβει από τις ιστοσελίδες το σφάλμα «λάθος κλειδί».");
+    return;
+  }
+  if (!res.ok) {
+    stop();
+    const msg = (body && body.error && body.error.message) || ("HTTP " + res.status);
+    setStatus(explain(res.status, msg), "bad");
+    note("Σφάλμα " + res.status + ": " + msg);
+    return;
+  }
+  trackEvent({ type: "http.201", session: body.session });
+  await pc.setRemoteDescription({ type: "answer", sdp: body.transport.sdp });
+
+  els.talk.textContent = "Σταμάτα";
+  els.talk.classList.add("on");
+  els.talk.disabled = false;
+  setStatus("Περιμένω να ξεκινήσει…");
+}
+
+// Τα πιο πιθανά σφάλματα, στα ελληνικά. Το αυτολεξεί μήνυμα γράφεται πάντα από κάτω.
+function explain(status, msg) {
+  if (status === 401) return "Η OpenAI δεν δέχτηκε το κλειδί.";
+  if (status === 429 && /quota|billing|credit/i.test(msg)) return "Δεν υπάρχει υπόλοιπο στον λογαριασμό της OpenAI.";
+  if (status === 429) return "Όριο κλήσεων της OpenAI — ξαναδοκίμασε σε λίγο.";
+  if (status === 403) return "Ο λογαριασμός δεν έχει πρόσβαση στο GPT-Live (θέλει προπληρωμένο υπόλοιπο).";
+  if (status === 400) return "Η OpenAI απέρριψε μια ρύθμιση — δες το μήνυμα από κάτω.";
+  return "Σφάλμα " + status + ".";
+}
+
+function onEvent(ev) {
+  switch (ev.type) {
+    case "session.started":
+      ready = true;
+      startedAt = Date.now();
+      ticker = setInterval(tick, 500);
+      els.sample.disabled = false;
+      setStatus("Μιλάτε.", "ok");
+      note("Φωνή: " + els.voice.value + (els.search.checked ? " · με αναζήτηση" : ""));
+      // Ο χαιρετισμός: οδηγία να πει κάτι συγκεκριμένο και να περιμένει.
+      if (els.greeting.value.trim()) {
+        send({ type: "session.instructions.append", delegation_id: null,
+               content: `Ξεκίνα τώρα λέγοντας ακριβώς: «${els.greeting.value.trim()}». Μετά σώπασε και άκου.` });
+      }
+      break;
+    case "session.input_transcript.delta":
+      if (ev.delta) say("you", ev.delta);
+      break;
+    case "session.output_transcript.delta":
+      if (ev.delta) say("aias", ev.delta);
+      break;
+    case "error": {
+      const e = ev.error || ev;
+      const msg = e.message || JSON.stringify(e).slice(0, 200);
+      note("Σφάλμα: " + msg);
+      setStatus("Σφάλμα από την OpenAI.", "bad");
+      break;
+    }
+    case "session.closed":
+      note("Η συνεδρία έκλεισε" + (ev.reason ? ": " + JSON.stringify(ev.reason) : "") + ".");
+      stop(true);
+      break;
+  }
+}
+
+function tick() {
+  const s = (Date.now() - startedAt) / 1000;
+  els.clock.textContent = Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  els.cost.textContent = "$" + (s / 60 * PER_MINUTE).toFixed(3) +
+    (els.search.checked ? " + αναζήτηση" : "");
+}
+
+function stop(fromServer) {
+  if (!fromServer && ready) send({ type: "session.close" });
+  ready = false;
+  if (ticker) { clearInterval(ticker); ticker = null; }
+  if (startedAt) tick();
+  startedAt = 0;
+  // Λίγος χρόνος για να φύγει το session.close πριν κλείσει το κανάλι.
+  const p = pc, m = mic, a = audio;
+  pc = null; dc = null; mic = null; audio = null;
+  setTimeout(() => {
+    try { p && p.close(); } catch (e) {}
+    if (m) for (const t of m.getTracks()) t.stop();
+    if (a) a.srcObject = null;
+  }, fromServer ? 0 : 400);
+  els.talk.textContent = "Μίλα";
+  els.talk.classList.remove("on");
+  els.talk.disabled = false;
+  els.sample.disabled = true;
+  if (!fromServer) setStatus("Σταμάτησε.");
+}
+
+els.talk.onclick = () => {
+  if (pc) { stop(); return; }
+  start().catch((e) => {
+    stop();
+    setStatus("Δεν ξεκίνησε: " + (e.message || e), "bad");
+  });
+};
+
+els.sample.onclick = () => {
+  const text = els.paragraph.value.trim();
+  if (!text) return;
+  send({ type: "session.instructions.append", delegation_id: null,
+         content: `Πες τώρα αυτολεξεί, με φυσικό ρυθμό, και μετά σώπασε: «${text}»` });
+};
+
+window.addEventListener("pagehide", () => { if (pc) stop(); });
+
+load();
+</script>
+</body>
+</html>
