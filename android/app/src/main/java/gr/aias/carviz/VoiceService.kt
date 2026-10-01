@@ -65,6 +65,9 @@ class VoiceService : Service() {
 
         private const val IN_RATE = 16000
 
+        /** Πόση σιωπή του server σημαίνει νεκρή γραμμή. Δες [startWatchdog]. */
+        private const val SILENCE_LIMIT_MS = 45_000L
+
         /**
          * Πόσο κρατάμε την εστίαση ήχου μετά τη σιωπή.
          *
@@ -201,25 +204,31 @@ class VoiceService : Service() {
     private var peak = 0.0
 
     /**
-     * ΤΟ ΧΡΟΝΟΜΕΤΡΟ ΠΟΥ ΣΚΟΤΩΝΕΙ ΓΡΑΜΜΕΣ. Η OkHttp στέλνει ping ανά
-     * `pingInterval` και, αν δεν έρθει pong ως το επόμενο, ρίχνει τη γραμμή
-     * **τοπικά** — χωρίς κλείσιμο προς τον server, που τη θεωρεί ζωντανή ως
-     * να λήξει μόνος του. Στις 29/09 ένα κόλλημα του δικτύου έφερε νέα
-     * συνεδρία 12″ μετά την τελευταία ατάκα, ενώ η παλιά χρεωνόταν ακόμη 57″.
+     * ΧΩΡΙΣ PING ΤΗΣ OkHttp — ΤΟ ΧΡΟΝΟΜΕΤΡΟ ΠΟΥ ΣΚΟΤΩΝΕ ΖΩΝΤΑΝΕΣ ΓΡΑΜΜΕΣ.
      *
-     * Ήταν 20 δευτ. Τώρα 30: μια TCP γραμμή επιβιώνει κόλλημα δεκάδων
-     * δευτερολέπτων (τούνελ, αλλαγή κεραίας), και αν τη δούμε να συνεχίζει δεν
-     * χρειάζεται ούτε επανασύνδεση ούτε δεύτερη χρέωση. Το κόστος είναι ότι
-     * μια γραμμή που πέθανε στ' αλήθεια φαίνεται 10″ αργότερα — όταν όμως δεν
-     * υπάρχει δίκτυο, δεν ξανασυνδεόμαστε έτσι κι αλλιώς.
+     * Η OkHttp έστελνε ping και, αν δεν ερχόταν pong ως το επόμενο, έριχνε τη
+     * γραμμή τοπικά, χωρίς κλείσιμο προς τον server. Στις 01/10 το έκανε δύο
+     * φορές μέσα στη διαδρομή — και το `sessions.log` έγραψε και τις δύο φορές
+     * «σιωπή server 0,5″» και «0,0″»: ο server έστελνε κανονικά, απλώς δεν
+     * απαντούσε στο ping. Από 20″ σε 30″ (0.48) δεν βοήθησε· ο server κάποτε
+     * απλώς δεν απαντά.
+     *
+     * Τώρα η γραμμή θεωρείται νεκρή μόνο αν ο server δεν στείλει **τίποτα** για
+     * [SILENCE_LIMIT_MS] — δες [startWatchdog]. Ο ElevenLabs στέλνει ήχο,
+     * κείμενα και δικά του ping· μια ζωντανή συνεδρία δεν σωπαίνει τόσο. Η
+     * μεγαλύτερη σιωπή κάθε συνεδρίας γράφεται στο `sessions.log`, για να
+     * ρυθμιστεί το όριο με μέτρηση.
      */
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)   // ο ήχος έρχεται συνεχώς
-        .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
     /** Πότε ήρθε το τελευταίο μήνυμα από τον server — για το «γιατί» κάθε επανασύνδεσης. */
     @Volatile private var lastRx = 0L
+    /** Η μεγαλύτερη σιωπή του server σε αυτή τη συνεδρία. */
+    @Volatile private var maxGap = 0L
+    /** Η γραμμή που έκοψε ο φύλακας, για να μη γραφτεί δεύτερη, λάθος αιτία. */
+    @Volatile private var killedSilent: WebSocket? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -243,6 +252,7 @@ class VoiceService : Service() {
         startCapture()
         startPlayback()
         startLevelTicker()
+        startWatchdog()
         return START_STICKY
     }
 
@@ -420,6 +430,10 @@ class VoiceService : Service() {
             note("δίκτυο", "${networkNote()} · προσπάθεια ${++attempt}")
             val l = Conn()
             listener = l
+            // Νέα γραμμή, μηδενικό ρολόι: αλλιώς ο φύλακας θα έβλεπε τη σιωπή
+            // της προηγούμενης και θα έκοβε αυτή πριν καν ανοίξει.
+            started = false
+            lastRx = 0L
             ws = client.newWebSocket(Request.Builder().url(url).build(), l)
             log("σύνδεση · προσπάθεια $attempt")
         }
@@ -506,12 +520,16 @@ class VoiceService : Service() {
             // Μόνο το μήκος της μνήμης, ποτέ το κείμενο: το ημερολόγιο είναι
             // διαγνωστικό, και τα διαγνωστικά δεν κρατάνε περιεχόμενο.
             log("πρώτο μήνυμα: memory ${memory.length} χαρ. · greeting «$greeting»")
+            lastRx = System.currentTimeMillis()
+            maxGap = 0L
             live = webSocket
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (!current(webSocket)) return
-            lastRx = System.currentTimeMillis()
+            val now = System.currentTimeMillis()
+            if (lastRx > 0L && now - lastRx > maxGap) maxGap = now - lastRx
+            lastRx = now
             handle(webSocket, text)
         }
 
@@ -527,7 +545,7 @@ class VoiceService : Service() {
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             finished()
             val why = t.message ?: t.javaClass.simpleName
-            log("αποτυχία: $why · ανοιχτές γραμμές ${openSockets.get()}")
+            log("αποτυχία: $why · ανοιχτές γραμμές ${openSockets.get()} · μέγ. σιωπή server ${gapNote()}")
             if (!current(webSocket)) return
             Log.w(TAG, "αποτυχία WebSocket", t)
             live = null
@@ -537,13 +555,17 @@ class VoiceService : Service() {
             if (response != null && refused("HTTP ${response.code} $why")) return
             // ΓΙΑΤΙ ΞΑΝΑΣΥΝΔΕΟΜΑΣΤΕ. Δικό μας χρονόμετρο ή το δίκτυο; Χωρίς
             // αυτή τη γραμμή, μια διπλή χρέωση δεν εξηγείται εκ των υστέρων.
-            val cause = when {
-                why.contains("pong", true) -> "δικό μας χρονόμετρο: ping χωρίς pong σε 30″"
-                response != null -> "ο server απάντησε HTTP ${response.code}"
-                !online() -> "το κινητό έμεινε χωρίς δίκτυο"
-                else -> "σφάλμα γραμμής/δικτύου (${t.javaClass.simpleName})"
+            // Αν την έκοψε ο φύλακας, η αιτία έχει ήδη γραφτεί — το «Canceled»
+            // της OkHttp θα έδειχνε ψευδώς σφάλμα δικτύου.
+            if (killedSilent !== webSocket) {
+                val cause = when {
+                    why.contains("pong", true) -> "δικό μας χρονόμετρο: ping χωρίς pong"
+                    response != null -> "ο server απάντησε HTTP ${response.code}"
+                    !online() -> "το κινητό έμεινε χωρίς δίκτυο"
+                    else -> "σφάλμα γραμμής/δικτύου (${t.javaClass.simpleName})"
+                }
+                log("ΕΠΑΝΑΣΥΝΔΕΣΗ · αιτία: $cause · σιωπή server ${silence()} · $why")
             }
-            log("ΕΠΑΝΑΣΥΝΔΕΣΗ · αιτία: $cause · σιωπή server ${silence()} · $why")
             val msg = if (!online()) "χωρίς ίντερνετ" else "σφάλμα σύνδεσης: $why"
             Voice.status = msg
             Voice.mode = "idle"
@@ -554,7 +576,7 @@ class VoiceService : Service() {
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             finished()
-            log("κλείσιμο $code ${reason.take(90)} · ανοιχτές γραμμές ${openSockets.get()}")
+            log("κλείσιμο $code ${reason.take(90)} · ανοιχτές γραμμές ${openSockets.get()} · μέγ. σιωπή server ${gapNote()}")
             if (!current(webSocket)) return
             live = null
             Log.i(TAG, "έκλεισε: $code $reason")
@@ -704,6 +726,31 @@ class VoiceService : Service() {
     private fun silence(): String =
         if (lastRx == 0L) "—" else "%.1f″".format((System.currentTimeMillis() - lastRx) / 1000.0)
 
+    private fun gapNote(): String = "%.1f″".format(maxGap / 1000.0)
+
+    /**
+     * Ο ΦΥΛΑΚΑΣ ΤΗΣ ΓΡΑΜΜΗΣ, στη θέση του ping της OkHttp.
+     *
+     * Κάθε δευτερόλεπτο: αν η συνεδρία έχει επιβεβαιωθεί και ο server δεν έχει
+     * στείλει τίποτα για [SILENCE_LIMIT_MS], η γραμμή κόβεται και ξεκινά η
+     * κανονική επανασύνδεση. Μία φορά ανά γραμμή.
+     */
+    private fun startWatchdog() {
+        Thread({
+            while (running) {
+                try { Thread.sleep(1000) } catch (e: InterruptedException) { break }
+                val w = ws ?: continue
+                if (!started || lastRx == 0L || killedSilent === w) continue
+                val gap = System.currentTimeMillis() - lastRx
+                if (gap < SILENCE_LIMIT_MS) continue
+                killedSilent = w
+                log("ΕΠΑΝΑΣΥΝΔΕΣΗ · αιτία: ο server δεν έστειλε τίποτα για %.1f″ · μέγ. σιωπή πριν %s"
+                    .format(gap / 1000.0, gapNote()))
+                try { w.cancel() } catch (e: Throwable) { }
+            }
+        }, "aias-watchdog").start()
+    }
+
     private fun log(event: String) {
         Log.i(TAG, "συνεδρία: $event")
         try {
@@ -722,6 +769,8 @@ class VoiceService : Service() {
                     started = true
                     refusals = 0
                     audioTo = webSocket
+                    // Μέτρηση μικροφώνου Android Auto, μόνο αν την όπλισε ο Γιάννης.
+                    CarMic.maybeMeasure(this, { log(it) }, { Rec.elapsed() })
                     sessionStart = System.currentTimeMillis()
                     val cid = o.optJSONObject("conversation_initiation_metadata_event")
                         ?.optString("conversation_id") ?: "—"
@@ -1568,6 +1617,7 @@ class VoiceService : Service() {
                             Voice.micHi, Voice.micHiSpeak, micSource(), interruptions))
                     note("ένταση", "κλήση %s · %s".format(callVolume(), volFix))
                     note("θέση", "%s · ρωτήθηκε %d".format(Where.line(), toolCalls))
+                    note("αυτοκίνητο", CarMic.status)
                     note("εγγραφή", "%s · %s".format(
                         Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
