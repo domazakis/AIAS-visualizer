@@ -268,23 +268,6 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { showMemory() }
         }
 
-        // ΜΕΤΡΗΣΗ ΜΙΚΡΟΦΩΝΟΥ ANDROID AUTO. Οπλίζει μία ηχογράφηση 30″ από το
-        // μικρόφωνο του Android Auto στην επόμενη συνομιλία στο αυτοκίνητο.
-        // Δες [CarMic]: μέτρηση, όχι λειτουργία — ο ΑΙΑΣ ακούει όπως πάντα.
-        val carMic = Button(this)
-        fun carMicLabel() {
-            carMic.text = if (CarMic.armed(this)) "Μέτρηση μικροφώνου αυτοκινήτου: ΟΠΛΙΣΜΕΝΗ"
-                          else "Μέτρηση μικροφώνου αυτοκινήτου"
-        }
-        carMicLabel()
-        carMic.setOnClickListener {
-            val on = !CarMic.armed(this)
-            CarMic.arm(this, on)
-            carMicLabel()
-            toast(if (on) "Στην επόμενη συνομιλία στο αυτοκίνητο θα ηχογραφηθούν 30″ από το μικρόφωνο του Android Auto."
-                  else "Η μέτρηση ακυρώθηκε.")
-        }
-
         val col = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             // Τα κουμπιά ΠΑΝΩ από το κείμενο. Ήταν από κάτω, και με τρεις
@@ -303,7 +286,6 @@ class MainActivity : AppCompatActivity() {
             addView(route, lp())
             addView(share, lp())
             addView(memory, lp())
-            addView(carMic, lp())
             addView(tv)
             addView(pv)
         }

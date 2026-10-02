@@ -65,8 +65,12 @@ class VoiceService : Service() {
 
         private const val IN_RATE = 16000
 
-        /** Πόση σιωπή του server σημαίνει νεκρή γραμμή. Δες [startWatchdog]. */
-        private const val SILENCE_LIMIT_MS = 45_000L
+        /**
+         * Πόση σιωπή του server σημαίνει νεκρή γραμμή. Δες [startWatchdog].
+         * Ήταν 45″ στην 0.49· στις 02/10 η μεγαλύτερη σιωπή μιας συνεδρίας
+         * τριών λεπτών, με ατάκες μισού λεπτού, ήταν 2,5″.
+         */
+        private const val SILENCE_LIMIT_MS = 15_000L
 
         /**
          * Πόσο κρατάμε την εστίαση ήχου μετά τη σιωπή.
@@ -229,6 +233,12 @@ class VoiceService : Service() {
     @Volatile private var maxGap = 0L
     /** Η γραμμή που έκοψε ο φύλακας, για να μη γραφτεί δεύτερη, λάθος αιτία. */
     @Volatile private var killedSilent: WebSocket? = null
+
+    /** Για τη μέτρηση της αποστολής ανά σειρά ομιλίας — δες [turnNote]. */
+    @Volatile private var turnMaxQueue = 0L
+    @Volatile private var turnMaxPing = -1
+    @Volatile private var msgBytes = 1L
+    @Volatile private var turnStartedAt = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -522,6 +532,9 @@ class VoiceService : Service() {
             log("πρώτο μήνυμα: memory ${memory.length} χαρ. · greeting «$greeting»")
             lastRx = System.currentTimeMillis()
             maxGap = 0L
+            turnMaxQueue = 0L
+            turnMaxPing = -1
+            turnStartedAt = lastRx
             live = webSocket
         }
 
@@ -729,6 +742,49 @@ class VoiceService : Service() {
     private fun gapNote(): String = "%.1f″".format(maxGap / 1000.0)
 
     /**
+     * ΑΡΓΕΙ Η ΑΠΟΣΤΟΛΗ ΟΣΟ ΜΙΛΑΕΙ Ο ΓΙΑΝΝΗΣ;
+     *
+     * Στις 02/10 η εφαρμογή απάντησε μετά από ατάκες 20–35″ σε 5,7″ και 3,2″,
+     * ενώ το preview του ElevenLabs, εννιά λεπτά νωρίτερα, σε 1,5″ και 2,6″. Αν
+     * ο ήχος δεν προλαβαίνει τον πραγματικό χρόνο, μαζεύεται ουρά και το τέλος
+     * της πρότασης φτάνει αργά — και ο server το μετρά ως δικό του κενό.
+     *
+     * Δύο μετρήσεις ανά σειρά, γραμμένες όταν ο server κλείσει τη σειρά:
+     * - η μέγιστη ουρά της OkHttp, σε χιλιοστά ήχου: ό,τι δεν είχε φύγει ακόμη·
+     * - ο μέγιστος χρόνος απόκρισης (`ping_ms`) που μέτρησε ο ίδιος ο server.
+     *   Πιάνει και ό,τι κάθεται στον buffer του λειτουργικού, που η OkHttp δεν
+     *   βλέπει: το pong μας φεύγει πίσω από όλο τον ήχο.
+     *
+     * Χωρίς το κείμενο — μόνο πόσες λέξεις. Τα διαγνωστικά δεν κρατάνε περιεχόμενο.
+     */
+    private fun turnNote(text: String) {
+        val now = System.currentTimeMillis()
+        val words = text.trim().split(Regex("\\s+")).count { it.isNotEmpty() }
+        val lagMs = turnMaxQueue * 40 / maxOf(msgBytes, 1L)
+        val secs = if (turnStartedAt > 0L) (now - turnStartedAt) / 1000 else 0
+        log("σειρά Γιάννη · $words λέξεις · ~${secs}″ από την προηγούμενη · " +
+            "μέγ. ουρά αποστολής ${lagMs} ms ήχου · μέγ. ping server " +
+            (if (turnMaxPing >= 0) "$turnMaxPing ms" else "—"))
+        turnMaxQueue = 0L
+        turnMaxPing = -1
+        turnStartedAt = now
+    }
+
+    /** Η θερμική κατάσταση του κινητού, για να φαίνεται αν οι καθυστερήσεις συμπίπτουν με ζέστη. */
+    private fun thermal(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return "—"
+        return try {
+            val pm = getSystemService(android.os.PowerManager::class.java)!!
+            val s = pm.currentThermalStatus
+            val name = arrayOf("κανονική", "ελαφριά", "μέτρια", "σοβαρή", "κρίσιμη", "έκτακτη", "κλείνει")
+                .getOrElse(s) { "$s" }
+            val head = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                " · περιθώριο %.2f".format(pm.getThermalHeadroom(10)) else ""
+            "$name ($s)$head"
+        } catch (e: Throwable) { "—" }
+    }
+
+    /**
      * Ο ΦΥΛΑΚΑΣ ΤΗΣ ΓΡΑΜΜΗΣ, στη θέση του ping της OkHttp.
      *
      * Κάθε δευτερόλεπτο: αν η συνεδρία έχει επιβεβαιωθεί και ο server δεν έχει
@@ -737,8 +793,15 @@ class VoiceService : Service() {
      */
     private fun startWatchdog() {
         Thread({
+            var tick = 0
             while (running) {
                 try { Thread.sleep(1000) } catch (e: InterruptedException) { break }
+                // Μία φορά το λεπτό, η ζέστη του κινητού.
+                if (tick++ % 60 == 0) {
+                    val th = thermal()
+                    log("θερμοκρασία: $th")
+                    note("θερμοκρασία", th)
+                }
                 val w = ws ?: continue
                 if (!started || lastRx == 0L || killedSilent === w) continue
                 val gap = System.currentTimeMillis() - lastRx
@@ -769,8 +832,6 @@ class VoiceService : Service() {
                     started = true
                     refusals = 0
                     audioTo = webSocket
-                    // Μέτρηση μικροφώνου Android Auto, μόνο αν την όπλισε ο Γιάννης.
-                    CarMic.maybeMeasure(this, { log(it) }, { Rec.elapsed() })
                     sessionStart = System.currentTimeMillis()
                     val cid = o.optJSONObject("conversation_initiation_metadata_event")
                         ?.optString("conversation_id") ?: "—"
@@ -797,8 +858,14 @@ class VoiceService : Service() {
                     if (st == "admitted") Voice.status = "συνδεδεμένος"
                 }
                 "ping" -> {
-                    val id = o.optJSONObject("ping_event")?.optInt("event_id") ?: 0
+                    val ev = o.optJSONObject("ping_event")
+                    val id = ev?.optInt("event_id") ?: 0
                     webSocket.send(JSONObject().put("type", "pong").put("event_id", id).toString())
+                    // Ο χρόνος απόκρισης όπως τον μετρά ο server. Το pong μας φεύγει
+                    // ΠΙΣΩ από όποιον ήχο περιμένει στην ουρά — αν η αποστολή μένει
+                    // πίσω όσο μιλάει ο Γιάννης, αυτός ο αριθμός φουσκώνει.
+                    val pm = ev?.optInt("ping_ms", -1) ?: -1
+                    if (pm > turnMaxPing) turnMaxPing = pm
                 }
                 // ΤΟ ΕΡΓΑΛΕΙΟ ΤΗΣ ΘΕΣΗΣ.
                 //
@@ -859,6 +926,8 @@ class VoiceService : Service() {
                     flushAudio()
                 }
                 "user_transcript" -> {
+                    turnNote(o.optJSONObject("user_transcription_event")
+                        ?.optString("user_transcript") ?: "")
                     val t = o.optJSONObject("user_transcription_event")
                         ?.optString("user_transcript") ?: ""
                     Voice.lastUser = t
@@ -914,6 +983,10 @@ class VoiceService : Service() {
         rec.startRecording()
 
         Thread({
+            // ΠΡΩΤΑ Ο ΗΧΟΣ. Όταν το κινητό ζεσταίνεται και κόβει ταχύτητα, να χάνει
+            // καρέ ο visualizer, όχι κομμάτια από τη φωνή του Γιάννη. Ως την 0.49
+            // το νήμα έτρεχε με κανονική προτεραιότητα, ίση με του renderer.
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             // Στέλνουμε ~40 ms τη φορά. Ήταν 100, και η ανίχνευση τέλους λόγου
             // στον server δεν μπορεί να δει τη σιωπή πριν φτάσει το κομμάτι που
             // την περιέχει: κάθε κομμάτι είναι κβάντο καθυστέρησης. Κάτω από 40
@@ -994,8 +1067,17 @@ class VoiceService : Service() {
                     // ο ήχος πετιέται — ένα κλάσμα του δευτερολέπτου σιωπής.
                     val w = audioTo
                     if (w == null || w !== ws) held++
-                    else if (w.send(JSONObject().put("user_audio_chunk", b64).toString())) sent++
-                    else sendFails++
+                    else {
+                        val msg = JSONObject().put("user_audio_chunk", b64).toString()
+                        if (w.send(msg)) {
+                            sent++
+                            // Η ουρά της OkHttp μετά από κάθε κομμάτι: ό,τι δεν έχει
+                            // φύγει ακόμη προς το δίκτυο. Δες [turnNote].
+                            msgBytes = msg.length.toLong()
+                            val q = w.queueSize()
+                            if (q > turnMaxQueue) turnMaxQueue = q
+                        } else sendFails++
+                    }
                 } catch (e: Throwable) { sendFails++ }
             }
         }, "aias-mic").start()
@@ -1441,6 +1523,7 @@ class VoiceService : Service() {
      */
     private fun startPlayback() {
         Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             while (running) {
                 val pcm = playQueue.poll(120, TimeUnit.MILLISECONDS) ?: continue
                 Rec.pushAgent(pcm)
@@ -1617,7 +1700,6 @@ class VoiceService : Service() {
                             Voice.micHi, Voice.micHiSpeak, micSource(), interruptions))
                     note("ένταση", "κλήση %s · %s".format(callVolume(), volFix))
                     note("θέση", "%s · ρωτήθηκε %d".format(Where.line(), toolCalls))
-                    note("αυτοκίνητο", CarMic.status)
                     note("εγγραφή", "%s · %s".format(
                         Rec.path?.substringAfterLast('/') ?: "—", Rec.elapsed()))
                     Voice.rollWindow()
